@@ -129,8 +129,9 @@ Resources:
     Properties:
       Handler: index.handler
       Role: !GetAtt DeployerRole.Arn
-      Runtime: python3.9
+      Runtime: python3.13
       Timeout: 300
+      MemorySize: 512
       Code:
         ZipFile: |
           import boto3
@@ -139,12 +140,13 @@ Resources:
           import io
           import json
           import mimetypes
+          import os
           
-          def send(event, context, responseStatus, responseData, physicalResourceId=None, noEcho=False):
+          def send(event, context, responseStatus, responseData, physicalResourceId=None, noEcho=False, reason=None):
               responseUrl = event['ResponseURL']
               responseBody = {{
                   'Status': responseStatus,
-                  'Reason': 'See the details in CloudWatch Log Stream: ' + context.log_stream_name,
+                  'Reason': reason or f'See CloudWatch Log Stream: {{context.log_stream_name}}',
                   'PhysicalResourceId': physicalResourceId or context.log_stream_name,
                   'StackId': event['StackId'],
                   'RequestId': event['RequestId'],
@@ -162,7 +164,7 @@ Resources:
                   with urllib.request.urlopen(req) as response:
                       print("Status code: " + response.reason)
               except Exception as e:
-                  print("send(..) failed executing requests.put(..): " + str(e))
+                  print("send(..) failed: " + str(e))
 
           def handler(event, context):
               try:
@@ -177,14 +179,12 @@ Resources:
                   with urllib.request.urlopen(source_url) as response:
                       zip_content = response.read()
                   
-                  print("Unzipping and uploading...")
                   s3 = boto3.client('s3')
                   
-                  # Detect if there's a root folder by checking all files
                   with zipfile.ZipFile(io.BytesIO(zip_content)) as z:
                       all_files = z.namelist()
                       
-                      # Check if all files are in a single root folder
+                      # Detect root folder
                       root_folder = None
                       if all_files:
                           first_path = all_files[0]
@@ -193,30 +193,79 @@ Resources:
                               if all(f.startswith(potential_root) or f == potential_root[:-1] for f in all_files):
                                   root_folder = potential_root
                       
+                      # Check for package.json (Node.js project)
+                      package_json_found = any(
+                          (root_folder and f == root_folder + 'package.json') or 
+                          (not root_folder and f == 'package.json')
+                          for f in all_files
+                      )
+                      
+                      # Check for dist/ or build/ folder (pre-built project)
+                      has_dist = any('dist/' in f or (root_folder and root_folder + 'dist/' in f) for f in all_files)
+                      has_build = any('build/' in f or (root_folder and root_folder + 'build/' in f) for f in all_files)
+                      
+                      if package_json_found and not (has_dist or has_build):
+                          error_msg = "Detected unbuild Node.js project. Please build locally (npm run build) and upload the dist/ folder contents."
+                          print(error_msg)
+                          send(event, context, 'FAILED', {{}}, reason=error_msg)
+                          return
+                      
+                      # Determine deployment folder prefix
+                      deploy_prefix = root_folder or ''
+                      if has_dist:
+                          deploy_prefix += 'dist/'
+                      elif has_build:
+                          deploy_prefix += 'build/'
+                      
+                      print(f"Deploying from: {{deploy_prefix or 'root'}}")
+                      
+                      uploaded_count = 0
                       for filename in all_files:
-                          # Skip macOS metadata files and directories
-                          if filename.startswith('__MACOSX/') or filename.startswith('.') or '/__MACOSX/' in filename or '/.' in filename:
+                          # Skip macOS metadata, hidden files, and directories
+                          if ('__MACOSX' in filename or filename.startswith('.') or 
+                              '/.'' in filename or filename.endswith('/')):
                               continue
-                          if not filename.endswith('/'):
-                              # Strip root folder if detected
-                              upload_key = filename
-                              if root_folder and filename.startswith(root_folder):
-                                  upload_key = filename[len(root_folder):]
-                              
-                              # Skip if empty key after stripping
-                              if not upload_key:
-                                  continue
-                              
-                              content_type, _ = mimetypes.guess_type(filename)
-                              if not content_type:
-                                  content_type = 'application/octet-stream'
-                              
-                              s3.put_object(
-                                  Bucket=bucket,
-                                  Key=upload_key,
-                                  Body=z.read(filename),
-                                  ContentType=content_type
-                              )
+                          
+                          # Skip node_modules
+                          if 'node_modules/' in filename:
+                              continue
+                          
+                          # Only process files in deployment folder
+                          if deploy_prefix and not filename.startswith(deploy_prefix):
+                              continue
+                          
+                          # Strip deployment prefix for S3 key
+                          upload_key = filename[len(deploy_prefix):] if deploy_prefix else filename
+                          
+                          # Skip empty keys
+                          if not upload_key or upload_key.endswith('/'):
+                              continue
+                          
+                          content_type, _ = mimetypes.guess_type(filename)
+                          if not content_type:
+                              content_type = 'application/octet-stream'
+                          
+                          s3.put_object(
+                              Bucket=bucket,
+                              Key=upload_key,
+                              Body=z.read(filename),
+                              ContentType=content_type
+                          )
+                          uploaded_count += 1
+                      
+                      print(f"Uploaded {{uploaded_count}} files")
+                      
+                      if uploaded_count == 0:
+                          error_msg = "No files were uploaded. Check your ZIP structure."
+                          send(event, context, 'FAILED', {{}}, reason=error_msg)
+                          return
+                  
+                  send(event, context, 'SUCCESS', {{}})
+              except Exception as e:
+                  print(f"Error: {{e}}")
+                  import traceback
+                  traceback.print_exc()
+                  send(event, context, 'FAILED', {{}}, reason=str(e))
                   
                   send(event, context, 'SUCCESS', {{}})
               except Exception as e:

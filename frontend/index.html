@@ -59,7 +59,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-16">
                 <div class="flex items-center">
-                    <span class="text-2xl font-bold text-white tracking-tight">Prodify</span>
+                    <a href="/" class="text-2xl font-bold text-white tracking-tight hover:text-aws-500 transition-colors">Prodify</a>
                 </div>
                 <div class="hidden md:block">
                     <div class="ml-10 flex items-baseline space-x-4">
@@ -144,8 +144,16 @@
             <div class="text-center mb-12">
                 <span class="text-aws-500 font-semibold tracking-wider uppercase text-sm">Free Tier</span>
                 <h2 class="text-3xl md:text-4xl font-bold text-white mt-2">Static Site Converter</h2>
-                <p class="mt-4 text-slate-400">Upload your Lovable project's <strong>built production files</strong> (.zip) and get a production-ready CloudFormation template.</p>
-                <p class="mt-2 text-sm text-slate-500">Build your project locally with <code class="bg-slate-800 px-2 py-1 rounded">npm run build</code>, then ZIP the <code class="bg-slate-800 px-2 py-1 rounded">dist/</code> folder contents.</p>
+                <p class="mt-4 text-slate-400">Upload your Lovable project and get a production-ready CloudFormation template.</p>
+                <div class="mt-4 p-4 bg-dark-800/50 rounded-lg border border-slate-700 max-w-2xl mx-auto text-left">
+                    <p class="text-sm text-slate-300 font-semibold mb-2">📦 For Lovable Projects:</p>
+                    <ol class="text-sm text-slate-400 space-y-1 ml-4 list-decimal">
+                        <li>Clone your GitHub repo locally</li>
+                        <li>Run <code class="bg-slate-800 px-2 py-0.5 rounded text-aws-400">npm run build</code> (or <code class="bg-slate-800 px-2 py-0.5 rounded text-aws-400">bun run build</code>)</li>
+                        <li>ZIP the contents of the <code class="bg-slate-800 px-2 py-0.5 rounded text-aws-400">dist/</code> folder</li>
+                        <li>Upload that ZIP here</li>
+                    </ol>
+                </div>
             </div>
 
             <div class="glass-panel rounded-3xl p-1 border border-white/10 shadow-2xl">
@@ -218,7 +226,7 @@
     <footer class="bg-dark-900 border-t border-white/5 py-12">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center">
             <div class="mb-4 md:mb-0">
-                <span class="text-xl font-bold text-white">Prodify</span>
+                <a href="/" class="text-xl font-bold text-white hover:text-aws-500 transition-colors">Prodify</a>
                 <p class="text-slate-500 text-sm mt-1">© 2025 Refaktr LLC. All rights reserved.</p>
             </div>
             <div class="flex space-x-6">

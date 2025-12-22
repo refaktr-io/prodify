@@ -59,7 +59,14 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-16">
                 <div class="flex items-center">
-                    <a href="/" class="text-2xl font-bold text-white tracking-tight hover:text-aws-500 transition-colors">Prodify</a>
+                    <a href="/" class="flex items-center gap-3 text-2xl font-bold text-white tracking-tight hover:text-aws-500 transition-colors group">
+                        <div class="w-10 h-10 bg-gradient-to-br from-aws-500 to-aws-600 rounded-lg flex items-center justify-center group-hover:shadow-lg group-hover:shadow-aws-500/50 transition-all">
+                            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                            </svg>
+                        </div>
+                        <span>Prodify</span>
+                    </a>
                 </div>
                 <div class="hidden md:block">
                     <div class="ml-10 flex items-baseline space-x-4">
@@ -139,39 +146,48 @@
     </section>
 
     <!-- Main Tool Section (Free Tier) -->
-    <section id="converter" class="py-24 relative">
-        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="text-center mb-12">
-                <span class="text-aws-500 font-semibold tracking-wider uppercase text-sm">Free Tier</span>
-                <h2 class="text-3xl md:text-4xl font-bold text-white mt-2">Static Site Converter</h2>
-                <p class="mt-4 text-slate-400">Upload your Lovable project and get a production-ready CloudFormation template.</p>
-                <div class="mt-4 p-4 bg-dark-800/50 rounded-lg border border-slate-700 max-w-2xl mx-auto text-left">
-                    <p class="text-sm text-slate-300 font-semibold mb-2">📦 For Lovable Projects:</p>
-                    <ol class="text-sm text-slate-400 space-y-1 ml-4 list-decimal">
-                        <li>Enable <a href="https://docs.lovable.dev/integrations/github" target="_blank" class="text-aws-400 hover:text-aws-300">GitHub integration</a> in Lovable</li>
-                        <li><a href="https://docs.github.com/en/get-started/start-your-journey/downloading-files-from-github#downloading-a-repositorys-files" target="_blank" class="text-aws-400 hover:text-aws-300">Export your Lovable project from GitHub</a> (entire repo ZIP)</li>
-                        <li>Upload the ZIP here</li>
-                        <li>Deploy the generated CloudFormation template</li>
-                        <li>Your project will be <strong class="text-aws-400">automatically built</strong> during deployment 🚀</li>
-                    </ol>
-                    <p class="text-xs text-slate-500 mt-3">✨ Prodify automatically detects your package manager and runs the build for you!</p>
-                </div>
-            </div>
+    <section id="converter" class="py-24 bg-gradient-to-b from-dark-900 to-dark-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="glass-panel rounded-3xl p-8 md:p-16 border border-aws-500/30 relative overflow-hidden">
+                <div class="absolute top-0 left-0 w-64 h-64 bg-aws-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2"></div>
+                
+                <div class="relative z-10">
+                    <div class="text-center mb-12">
+                        <span class="text-aws-500 font-semibold tracking-wider uppercase text-sm">Free Tier</span>
+                        <h2 class="text-3xl md:text-4xl font-bold text-white mt-2">Static Site Converter</h2>
+                        <p class="mt-4 text-slate-400">Upload your Lovable project and get a production-ready CloudFormation template.</p>
+                    </div>
 
-            <div class="glass-panel rounded-3xl p-1 border border-white/10 shadow-2xl">
-                <div class="bg-dark-900/50 rounded-[20px] p-8 md:p-12 text-center border-2 border-dashed border-slate-700 hover:border-aws-500 transition-colors cursor-pointer group" id="drop-zone">
-                    <div class="mb-6">
-                        <div class="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto group-hover:bg-aws-500/20 transition-colors">
-                            <svg class="w-10 h-10 text-slate-400 group-hover:text-aws-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                    <div class="max-w-2xl mx-auto mb-8">
+                        <div class="p-6 bg-dark-900/50 rounded-lg border border-slate-700">
+                            <p class="text-sm text-slate-300 font-semibold mb-3">📦 For Lovable Projects:</p>
+                            <ol class="text-sm text-slate-400 space-y-2 ml-4 list-decimal">
+                                <li>Enable <a href="https://docs.lovable.dev/integrations/github" target="_blank" class="text-aws-400 hover:text-aws-300">GitHub integration</a> in Lovable</li>
+                                <li><a href="https://docs.github.com/en/get-started/start-your-journey/downloading-files-from-github#downloading-a-repositorys-files" target="_blank" class="text-aws-400 hover:text-aws-300">Export your Lovable project from GitHub</a> (entire repo ZIP)</li>
+                                <li>Upload the ZIP here</li>
+                                <li>Deploy the generated CloudFormation template</li>
+                                <li>Your project will be <strong class="text-aws-400">automatically built</strong> during deployment 🚀</li>
+                            </ol>
+                            <p class="text-xs text-slate-500 mt-4">✨ Prodify automatically detects your package manager and runs the build for you!</p>
                         </div>
                     </div>
-                    <h3 class="text-xl font-semibold text-white mb-2">Drag & Drop your project .zip here</h3>
-                    <p class="text-slate-500 mb-6">or click to browse files</p>
-                    <input type="file" id="file-input" class="hidden" accept=".zip">
-                    <button class="bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-lg font-medium transition-colors">
-                        Select File
-                    </button>
-                    <p class="mt-4 text-xs text-slate-600">Generates S3 + CloudFront CloudFormation Template</p>
+
+                    <div class="glass-panel rounded-2xl p-1 border border-white/10 shadow-2xl">
+                        <div class="bg-dark-900/50 rounded-xl p-8 md:p-12 text-center border-2 border-dashed border-slate-700 hover:border-aws-500 transition-colors cursor-pointer group" id="drop-zone">
+                            <div class="mb-6">
+                                <div class="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto group-hover:bg-aws-500/20 transition-colors">
+                                    <svg class="w-10 h-10 text-slate-400 group-hover:text-aws-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                                </div>
+                            </div>
+                            <h3 class="text-xl font-semibold text-white mb-2">Drag & Drop your project .zip here</h3>
+                            <p class="text-slate-500 mb-6">or click to browse files</p>
+                            <input type="file" id="file-input" class="hidden" accept=".zip">
+                            <button class="bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-lg font-medium transition-colors">
+                                Select File
+                            </button>
+                            <p class="mt-4 text-xs text-slate-600">Generates S3 + CloudFront CloudFormation Template</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

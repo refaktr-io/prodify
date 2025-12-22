@@ -1,8 +1,14 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
-Description: Prodify Backend
+Description: Prodify Backend - Pure CloudFormation
+
+Parameters:
+  DeploymentPackageBucket:
+    Type: String
+    Default: prodify-deploy-532931254745-us-east-1
+    Description: S3 bucket where Lambda deployment packages are stored
 
 Resources:
+  # S3 Staging Bucket
   StagingBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -19,103 +25,351 @@ Resources:
             Status: Enabled
             ExpirationInDays: 1
 
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource:
+                  - !GetAtt StagingBucket.Arn
+                  - !Sub "${StagingBucket.Arn}/*"
+
+  # Upload Request Lambda
   UploadRequestFunction:
-    Type: AWS::Serverless::Function
+    Type: AWS::Lambda::Function
     Properties:
-      CodeUri: ../src/
+      FunctionName: prodify-upload-request
+      Runtime: python3.9
       Handler: upload_request.handler
-      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref DeploymentPackageBucket
+        S3Key: lambda-code.zip
       Environment:
         Variables:
-          STAGING_BUCKET: !Sub "prodify-staging-${AWS::AccountId}-${AWS::Region}"
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action: 
-                - s3:PutObject
-                - s3:GetObject
-                - s3:ListBucket
-              Resource: 
-                - !Sub "arn:aws:s3:::prodify-staging-${AWS::AccountId}-${AWS::Region}"
-                - !Sub "arn:aws:s3:::prodify-staging-${AWS::AccountId}-${AWS::Region}/*"
-      Events:
-        Api:
-          Type: Api
-          Properties:
-            Path: /upload-request
-            Method: post
-            RestApiId: !Ref ProdifyApi
+          STAGING_BUCKET: !Ref StagingBucket
+      Timeout: 30
 
+  UploadRequestPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref UploadRequestFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ProdifyApi}/*"
+
+  # Status Lambda
   StatusFunction:
-    Type: AWS::Serverless::Function
+    Type: AWS::Lambda::Function
     Properties:
-      CodeUri: ../src/
+      FunctionName: prodify-status
+      Runtime: python3.9
       Handler: status.handler
-      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref DeploymentPackageBucket
+        S3Key: lambda-code.zip
       Environment:
         Variables:
-          STAGING_BUCKET: !Sub "prodify-staging-${AWS::AccountId}-${AWS::Region}"
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action: 
-                - s3:GetObject
-                - s3:ListBucket
-              Resource: 
-                - !Sub "arn:aws:s3:::prodify-staging-${AWS::AccountId}-${AWS::Region}"
-                - !Sub "arn:aws:s3:::prodify-staging-${AWS::AccountId}-${AWS::Region}/*"
-      Events:
-        Api:
-          Type: Api
-          Properties:
-            Path: /status/{requestId}
-            Method: get
-            RestApiId: !Ref ProdifyApi
+          STAGING_BUCKET: !Ref StagingBucket
+      Timeout: 30
 
+  StatusPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref StatusFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ProdifyApi}/*"
+
+  # Generator Lambda
   GeneratorFunction:
-    Type: AWS::Serverless::Function
+    Type: AWS::Lambda::Function
     Properties:
-      CodeUri: ../src/
-      Handler: generator.handler
+      FunctionName: prodify-generator
       Runtime: python3.9
-      Timeout: 60
+      Handler: generator.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref DeploymentPackageBucket
+        S3Key: lambda-code.zip
       Environment:
         Variables:
-          STAGING_BUCKET: !Sub "prodify-staging-${AWS::AccountId}-${AWS::Region}"
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action: 
-                - s3:PutObject
-                - s3:GetObject
-                - s3:ListBucket
-              Resource: 
-                - !Sub "arn:aws:s3:::prodify-staging-${AWS::AccountId}-${AWS::Region}"
-                - !Sub "arn:aws:s3:::prodify-staging-${AWS::AccountId}-${AWS::Region}/*"
-      Events:
-        S3Event:
-          Type: S3
-          Properties:
-            Bucket: !Ref StagingBucket
-            Events: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: uploads/
-                  - Name: suffix
-                    Value: .zip
+          STAGING_BUCKET: !Ref StagingBucket
+      Timeout: 60
 
-  ProdifyApi:
-    Type: AWS::Serverless::Api
+  GeneratorPermission:
+    Type: AWS::Lambda::Permission
     Properties:
+      FunctionName: !Ref GeneratorFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt StagingBucket.Arn
+
+  # S3 Event Configuration (Custom Resource)
+  S3NotificationLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3NotificationConfig
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutBucketNotification
+                  - s3:GetBucketNotification
+                Resource: !GetAtt StagingBucket.Arn
+
+  S3NotificationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt S3NotificationLambdaRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          
+          s3 = boto3.client('s3')
+          
+          def handler(event, context):
+              try:
+                  bucket = event['ResourceProperties']['Bucket']
+                  function_arn = event['ResourceProperties']['FunctionArn']
+                  
+                  if event['RequestType'] == 'Delete':
+                      s3.put_bucket_notification_configuration(Bucket=bucket, NotificationConfiguration={})
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  
+                  config = {
+                      'LambdaFunctionConfigurations': [{
+                          'LambdaFunctionArn': function_arn,
+                          'Events': ['s3:ObjectCreated:*'],
+                          'Filter': {
+                              'Key': {
+                                  'FilterRules': [
+                                      {'Name': 'prefix', 'Value': 'uploads/'},
+                                      {'Name': 'suffix', 'Value': '.zip'}
+                                  ]
+                              }
+                          }
+                      }]
+                  }
+                  
+                  s3.put_bucket_notification_configuration(Bucket=bucket, NotificationConfiguration=config)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print(e)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  S3NotificationCustomResource:
+    Type: Custom::S3NotificationConfig
+    DependsOn: GeneratorPermission
+    Properties:
+      ServiceToken: !GetAtt S3NotificationFunction.Arn
+      Bucket: !Ref StagingBucket
+      FunctionArn: !GetAtt GeneratorFunction.Arn
+
+  # API Gateway
+  ProdifyApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: prodify-api
+      Description: Prodify Backend API
+
+  # CORS Configuration
+  ApiGatewayOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ProdifyApi
+      ResourceId: !GetAtt ProdifyApi.RootResourceId
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # /upload-request resource
+  UploadRequestResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ProdifyApi
+      ParentId: !GetAtt ProdifyApi.RootResourceId
+      PathPart: upload-request
+
+  UploadRequestMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ProdifyApi
+      ResourceId: !Ref UploadRequestResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UploadRequestFunction.Arn}/invocations"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+
+  UploadRequestOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ProdifyApi
+      ResourceId: !Ref UploadRequestResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # /status resource
+  StatusResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ProdifyApi
+      ParentId: !GetAtt ProdifyApi.RootResourceId
+      PathPart: status
+
+  StatusRequestIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ProdifyApi
+      ParentId: !Ref StatusResource
+      PathPart: "{requestId}"
+
+  StatusMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ProdifyApi
+      ResourceId: !Ref StatusRequestIdResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${StatusFunction.Arn}/invocations"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+
+  StatusOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ProdifyApi
+      ResourceId: !Ref StatusRequestIdResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # API Deployment
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - UploadRequestMethod
+      - StatusMethod
+      - UploadRequestOptionsMethod
+      - StatusOptionsMethod
+    Properties:
+      RestApiId: !Ref ProdifyApi
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref ProdifyApi
+      DeploymentId: !Ref ApiDeployment
       StageName: Prod
-      Cors:
-        AllowMethods: "'OPTIONS,POST,GET'"
-        AllowHeaders: "'Content-Type'"
-        AllowOrigin: "'*'"
 
 Outputs:
   ApiUrl:
-    Description: "API Gateway endpoint URL"
+    Description: API Gateway endpoint URL
     Value: !Sub "https://${ProdifyApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+    Export:
+      Name: ProdifyApiUrl
+  
+  StagingBucketName:
+    Description: S3 staging bucket name
+    Value: !Ref StagingBucket

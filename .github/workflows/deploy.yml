@@ -34,7 +34,7 @@ jobs:
         run: |
           cd backend
           aws cloudformation deploy \
-            --template-file infrastructure/cloudformation-template.yaml \
+            --template-file infrastructure/template.yaml \
             --stack-name prodify-backend \
             --capabilities CAPABILITY_IAM \
             --no-fail-on-empty-changeset

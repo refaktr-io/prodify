@@ -17,14 +17,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
-
-      - name: Setup AWS SAM
-        uses: aws-actions/setup-sam@v2
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -32,19 +24,19 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: SAM Build
+      - name: Package Lambda Code
         run: |
-          cd backend
-          sam build
+          cd backend/src
+          zip -r ../lambda-code.zip *.py
+          aws s3 cp ../lambda-code.zip s3://prodify-deploy-532931254745-us-east-1/lambda-code.zip
 
-      - name: SAM Deploy
+      - name: Deploy CloudFormation Stack
         run: |
           cd backend
-          sam deploy \
+          aws cloudformation deploy \
+            --template-file infrastructure/cloudformation-template.yaml \
             --stack-name prodify-backend \
             --capabilities CAPABILITY_IAM \
-            --resolve-s3 \
-            --no-confirm-changeset \
             --no-fail-on-empty-changeset
 
       - name: Get API URL

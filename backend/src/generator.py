@@ -36,35 +36,38 @@ Resources:
   WebsiteBucket:
     Type: AWS::S3::Bucket
     Properties:
-      WebsiteConfiguration:
-        IndexDocument: index.html
       PublicAccessBlockConfiguration:
-        BlockPublicAcls: false
-        BlockPublicPolicy: false
-        IgnorePublicAcls: false
-        RestrictPublicBuckets: false
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
 
-  CloudFrontOAI:
-    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
     Properties:
-      CloudFrontOriginAccessIdentityConfig:
-        Comment: !Sub "Access for ${{WebsiteBucket}}"
+      OriginAccessControlConfig:
+        Name: !Sub "${{AWS::StackName}}-OAC"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
 
   WebsiteBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
       Bucket: !Ref WebsiteBucket
       PolicyDocument:
+        Version: '2008-10-17'
+        Id: PolicyForCloudFrontPrivateContent
         Statement:
-          - Effect: Allow
+          - Sid: AllowCloudFrontServicePrincipal
+            Effect: Allow
             Principal:
-              CanonicalUser: !GetAtt CloudFrontOAI.S3CanonicalUserId
+              Service: cloudfront.amazonaws.com
             Action: s3:GetObject
-            Resource: !Sub ${{WebsiteBucket.Arn}}/*
-          - Effect: Allow
-            Principal: "*"
-            Action: s3:GetObject
-            Resource: !Sub ${{WebsiteBucket.Arn}}/*
+            Resource: !Sub "${{WebsiteBucket.Arn}}/*"
+            Condition:
+              StringEquals:
+                "AWS:SourceArn": !Sub "arn:aws:cloudfront::${{AWS::AccountId}}:distribution/${{CloudFrontDistribution}}"
 
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
@@ -75,15 +78,21 @@ Resources:
         Origins:
           - Id: S3Origin
             DomainName: !GetAtt WebsiteBucket.RegionalDomainName
+            OriginAccessControlId: !Ref CloudFrontOriginAccessControl
             S3OriginConfig:
-              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${{CloudFrontOAI}}"
+              OriginAccessIdentity: ''
         DefaultCacheBehavior:
           TargetOriginId: S3Origin
           ViewerProtocolPolicy: redirect-to-https
-          ForwardedValues:
-            QueryString: false
-            Cookies:
-              Forward: none
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
 
   DeployerRole:
     Type: AWS::IAM::Role
@@ -222,12 +231,12 @@ Resources:
       BucketName: !Ref WebsiteBucket
 
 Outputs:
-  WebsiteURL:
-    Value: !GetAtt WebsiteBucket.WebsiteURL
-    Description: URL for website hosted on S3
   CloudFrontURL:
-    Value: !GetAtt CloudFrontDistribution.DomainName
-    Description: URL for website hosted on CloudFront
+    Value: !Sub "https://${{CloudFrontDistribution.DomainName}}"
+    Description: CloudFront URL for your website
+  S3BucketName:
+    Value: !Ref WebsiteBucket
+    Description: S3 bucket name
 """
 
     # Upload the generated template

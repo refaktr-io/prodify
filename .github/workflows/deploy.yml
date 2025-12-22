@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'backend/**'
+      - 'frontend/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
@@ -53,6 +54,20 @@ jobs:
         run: |
           sed -i "s|const API_BASE_URL = '.*';|const API_BASE_URL = '${{ steps.get-api-url.outputs.API_URL }}';|g" frontend/index.html
           echo "Updated frontend/index.html with API URL"
+
+      - name: Deploy Frontend to S3
+        run: |
+          aws s3 cp frontend/index.html s3://refaktr.io/prodify/index.html \
+            --content-type "text/html" \
+            --cache-control "max-age=300"
+          echo "Deployed frontend to s3://refaktr.io/prodify/index.html"
+
+      - name: Invalidate CloudFront Cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id E1KCOUEOAKPFU3 \
+            --paths "/prodify/index.html"
+          echo "Created CloudFront invalidation for /prodify/index.html"
 
       - name: Commit updated frontend
         run: |

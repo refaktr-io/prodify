@@ -268,6 +268,9 @@
                 return;
             }
 
+            // Extract stack name from filename (remove .zip extension)
+            const stackName = file.name.replace('.zip', '');
+
             // UI: Uploading state
             dropZone.innerHTML = `
                 <div class="animate-pulse">
@@ -302,7 +305,7 @@
                 const templateUrl = await pollStatus(requestId);
 
                 // 4. Show Success / Deploy Button
-                const quickCreateLink = `https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=${encodeURIComponent(templateUrl)}&stackName=MyProdifyApp`;
+                const quickCreateLink = `https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL=${encodeURIComponent(templateUrl)}&stackName=${encodeURIComponent(stackName)}`;
 
                 dropZone.innerHTML = `
                     <div class="text-center">
@@ -311,10 +314,10 @@
                         </div>
                         <h3 class="text-xl font-semibold text-white mb-2">Template Ready!</h3>
                         <p class="text-slate-400 mb-6">Your AWS infrastructure code has been generated.</p>
-                        <a href="${quickCreateLink}" target="_blank" class="inline-block bg-aws-500 hover:bg-aws-600 text-white px-8 py-3 rounded-lg font-bold transition-colors shadow-lg">
+                        <a href="${quickCreateLink}" target="_blank" rel="noopener noreferrer" class="inline-block bg-aws-500 hover:bg-aws-600 text-white px-8 py-3 rounded-lg font-bold transition-colors shadow-lg">
                             Deploy to AWS
                         </a>
-                        <p class="mt-4 text-xs text-slate-500">Opens AWS CloudFormation Console</p>
+                        <p class="mt-4 text-xs text-slate-500">Opens AWS CloudFormation Console with pre-loaded template</p>
                     </div>
                 `;
 

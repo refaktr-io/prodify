@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Prodify Backend
+
+Resources:
+  StagingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "prodify-staging-${AWS::AccountId}-${AWS::Region}"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [PUT, GET, HEAD]
+            AllowedOrigins: ['*']
+            MaxAge: 3000
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteAfter24Hours
+            Status: Enabled
+            ExpirationInDays: 1
+
+  UploadRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../src/
+      Handler: upload_request.handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          STAGING_BUCKET: !Sub "prodify-staging-${AWS::AccountId}-${AWS::Region}"
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: 
+                - s3:PutObject
+                - s3:GetObject
+                - s3:ListBucket
+              Resource: 
+                - !Sub "arn:aws:s3:::prodify-staging-${AWS::AccountId}-${AWS::Region}"
+                - !Sub "arn:aws:s3:::prodify-staging-${AWS::AccountId}-${AWS::Region}/*"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /upload-request
+            Method: post
+            RestApiId: !Ref ProdifyApi
+
+  StatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../src/
+      Handler: status.handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          STAGING_BUCKET: !Sub "prodify-staging-${AWS::AccountId}-${AWS::Region}"
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: 
+                - s3:GetObject
+                - s3:ListBucket
+              Resource: 
+                - !Sub "arn:aws:s3:::prodify-staging-${AWS::AccountId}-${AWS::Region}"
+                - !Sub "arn:aws:s3:::prodify-staging-${AWS::AccountId}-${AWS::Region}/*"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /status/{requestId}
+            Method: get
+            RestApiId: !Ref ProdifyApi
+
+  GeneratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../src/
+      Handler: generator.handler
+      Runtime: python3.9
+      Timeout: 60
+      Environment:
+        Variables:
+          STAGING_BUCKET: !Sub "prodify-staging-${AWS::AccountId}-${AWS::Region}"
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: 
+                - s3:PutObject
+                - s3:GetObject
+                - s3:ListBucket
+              Resource: 
+                - !Sub "arn:aws:s3:::prodify-staging-${AWS::AccountId}-${AWS::Region}"
+                - !Sub "arn:aws:s3:::prodify-staging-${AWS::AccountId}-${AWS::Region}/*"
+      Events:
+        S3Event:
+          Type: S3
+          Properties:
+            Bucket: !Ref StagingBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: uploads/
+                  - Name: suffix
+                    Value: .zip
+
+  ProdifyApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'OPTIONS,POST,GET'"
+        AllowHeaders: "'Content-Type'"
+        AllowOrigin: "'*'"
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${ProdifyApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"

@@ -233,6 +233,8 @@
         // Drag and Drop Logic
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('file-input');
+        
+        const API_BASE_URL = 'https://x7entq0ff2.execute-api.us-east-1.amazonaws.com/Prod';
 
         dropZone.addEventListener('click', () => fileInput.click());
 
@@ -260,36 +262,95 @@
             }
         });
 
-        function handleFile(file) {
-            if (file.name.endsWith('.zip')) {
-                // Mock processing
-                const originalText = dropZone.innerHTML;
+        async function handleFile(file) {
+            if (!file.name.endsWith('.zip')) {
+                alert('Please upload a .zip file');
+                return;
+            }
+
+            // UI: Uploading state
+            dropZone.innerHTML = `
+                <div class="animate-pulse">
+                    <div class="w-16 h-16 border-4 border-aws-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                    <h3 class="text-xl font-semibold text-white">Uploading Project...</h3>
+                    <p class="text-slate-400 mt-2">${file.name}</p>
+                </div>
+            `;
+
+            try {
+                // 1. Request Upload URL
+                const uploadReq = await fetch(`${API_BASE_URL}/upload-request`, { method: 'POST' });
+                const { uploadUrl, requestId } = await uploadReq.json();
+
+                // 2. Upload File to S3
+                await fetch(uploadUrl, {
+                    method: 'PUT',
+                    body: file,
+                    headers: { 'Content-Type': 'application/zip' }
+                });
+
+                // UI: Processing state
                 dropZone.innerHTML = `
                     <div class="animate-pulse">
                         <div class="w-16 h-16 border-4 border-aws-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                        <h3 class="text-xl font-semibold text-white">Generating CloudFormation Template...</h3>
-                        <p class="text-slate-400 mt-2">Analyzing ${file.name}</p>
+                        <h3 class="text-xl font-semibold text-white">Generating CloudFormation...</h3>
+                        <p class="text-slate-400 mt-2">Analyzing project structure</p>
                     </div>
                 `;
-                
-                // Simulate delay
-                setTimeout(() => {
-                    dropZone.innerHTML = `
-                        <div class="text-center">
-                            <div class="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                                <svg class="w-10 h-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                            </div>
-                            <h3 class="text-xl font-semibold text-white mb-2">Template Ready!</h3>
-                            <p class="text-slate-400 mb-6">Your AWS infrastructure code has been generated.</p>
-                            <button class="bg-aws-500 hover:bg-aws-600 text-white px-8 py-3 rounded-lg font-bold transition-colors shadow-lg" onclick="location.reload()">
-                                Download template.yaml
-                            </button>
+
+                // 3. Poll for Status
+                const templateUrl = await pollStatus(requestId);
+
+                // 4. Show Success / Deploy Button
+                const quickCreateLink = `https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=${encodeURIComponent(templateUrl)}&stackName=MyProdifyApp`;
+
+                dropZone.innerHTML = `
+                    <div class="text-center">
+                        <div class="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <svg class="w-10 h-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
                         </div>
-                    `;
-                }, 2000);
-            } else {
-                alert('Please upload a .zip file');
+                        <h3 class="text-xl font-semibold text-white mb-2">Template Ready!</h3>
+                        <p class="text-slate-400 mb-6">Your AWS infrastructure code has been generated.</p>
+                        <a href="${quickCreateLink}" target="_blank" class="inline-block bg-aws-500 hover:bg-aws-600 text-white px-8 py-3 rounded-lg font-bold transition-colors shadow-lg">
+                            Deploy to AWS
+                        </a>
+                        <p class="mt-4 text-xs text-slate-500">Opens AWS CloudFormation Console</p>
+                    </div>
+                `;
+
+            } catch (error) {
+                console.error(error);
+                dropZone.innerHTML = `
+                    <div class="text-center">
+                        <div class="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <svg class="w-10 h-10 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </div>
+                        <h3 class="text-xl font-semibold text-white mb-2">Error</h3>
+                        <p class="text-slate-400 mb-6">Something went wrong. Please try again.</p>
+                        <button class="text-aws-500 hover:text-aws-400 underline" onclick="location.reload()">Try Again</button>
+                    </div>
+                `;
             }
+        }
+
+        async function pollStatus(requestId) {
+            const maxRetries = 30; // 30 * 2s = 60s timeout
+            let retries = 0;
+
+            while (retries < maxRetries) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                try {
+                    const res = await fetch(`${API_BASE_URL}/status/${requestId}`);
+                    const data = await res.json();
+                    if (data.status === 'READY') {
+                        return data.templateUrl;
+                    }
+                } catch (e) {
+                    console.log('Polling error', e);
+                }
+                retries++;
+            }
+            throw new Error('Timeout waiting for template generation');
         }
     </script>
 </body>

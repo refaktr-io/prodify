@@ -38,6 +38,11 @@ Resources:
     Properties:
       WebsiteConfiguration:
         IndexDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
 
   CloudFrontOAI:
     Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
@@ -54,6 +59,10 @@ Resources:
           - Effect: Allow
             Principal:
               CanonicalUser: !GetAtt CloudFrontOAI.S3CanonicalUserId
+            Action: s3:GetObject
+            Resource: !Sub ${{WebsiteBucket.Arn}}/*
+          - Effect: Allow
+            Principal: "*"
             Action: s3:GetObject
             Resource: !Sub ${{WebsiteBucket.Arn}}/*
 
@@ -161,16 +170,41 @@ Resources:
                   
                   print("Unzipping and uploading...")
                   s3 = boto3.client('s3')
+                  
+                  # Detect if there's a root folder by checking all files
                   with zipfile.ZipFile(io.BytesIO(zip_content)) as z:
-                      for filename in z.namelist():
+                      all_files = z.namelist()
+                      
+                      # Check if all files are in a single root folder
+                      root_folder = None
+                      if all_files:
+                          first_path = all_files[0]
+                          if '/' in first_path:
+                              potential_root = first_path.split('/')[0] + '/'
+                              if all(f.startswith(potential_root) or f == potential_root[:-1] for f in all_files):
+                                  root_folder = potential_root
+                      
+                      for filename in all_files:
+                          # Skip macOS metadata files and directories
+                          if filename.startswith('__MACOSX/') or filename.startswith('.') or '/__MACOSX/' in filename or '/.' in filename:
+                              continue
                           if not filename.endswith('/'):
+                              # Strip root folder if detected
+                              upload_key = filename
+                              if root_folder and filename.startswith(root_folder):
+                                  upload_key = filename[len(root_folder):]
+                              
+                              # Skip if empty key after stripping
+                              if not upload_key:
+                                  continue
+                              
                               content_type, _ = mimetypes.guess_type(filename)
                               if not content_type:
                                   content_type = 'application/octet-stream'
                               
                               s3.put_object(
                                   Bucket=bucket,
-                                  Key=filename,
+                                  Key=upload_key,
                                   Body=z.read(filename),
                                   ContentType=content_type
                               )

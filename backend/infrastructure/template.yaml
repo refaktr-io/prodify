@@ -58,7 +58,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: prodify-upload-request
-      Runtime: python3.14
+      Runtime: python3.13
       Handler: upload_request.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
@@ -82,7 +82,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: prodify-status
-      Runtime: python3.14
+      Runtime: python3.13
       Handler: status.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
@@ -106,7 +106,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: prodify-generator
-      Runtime: python3.14
+      Runtime: python3.13
       Handler: generator.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
@@ -153,7 +153,7 @@ Resources:
   S3NotificationFunction:
     Type: AWS::Lambda::Function
     Properties:
-      Runtime: python3.14
+      Runtime: python3.13
       Handler: index.handler
       Role: !GetAtt S3NotificationLambdaRole.Arn
       Timeout: 30

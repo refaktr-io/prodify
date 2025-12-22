@@ -29,7 +29,7 @@ jobs:
         run: |
           cd backend/src
           zip -r ../lambda-code.zip *.py
-          aws s3 cp ../lambda-code.zip s3://prodify-deploy-532931254745-us-east-1/lambda-code.zip
+          aws s3 cp ../lambda-code.zip s3://prodify-backend/lambda-code.zip
 
       - name: Deploy CloudFormation Stack
         run: |

@@ -136,7 +136,7 @@ Resources:
       Architectures:
         - arm64
       Code:
-        ImageUri: 532931254745.dkr.ecr.us-east-1.amazonaws.com/prodify-content-deployer:latest
+        ImageUri: 532931254745.dkr.ecr.us-east-1.amazonaws.com/prodify-content-deployer@sha256:654a4b4b1e6a5d12c60534d30600a52b407ed046ba0a4f757d5e67ff8246d17a
 
   DeploymentTrigger:
     Type: Custom::ContentDeployer

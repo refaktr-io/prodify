@@ -88,26 +88,48 @@ def handler(event, context):
                 
                 try:
                     if has_bun:
-                        print("Bun not supported in this Lambda. Please build locally.")
-                        send_response(event, context, 'FAILED', {}, 
-                                    reason="Bun projects must be built locally. Run 'bun run build' and upload the dist/ folder.")
-                        return
-                    
-                    print("Installing dependencies...")
-                    result = subprocess.run(
-                        ['npm', 'ci', '--omit=dev'],
-                        cwd=work_dir,
-                        capture_output=True,
-                        text=True,
-                        timeout=600
-                    )
-                    print(result.stdout)
-                    if result.returncode != 0:
-                        print(f"npm install stderr: {result.stderr}")
-                    
-                    print("Building project...")
-                    result = subprocess.run(
-                        ['npm', 'run', 'build'],
+                        print("Installing dependencies with Bun...")
+                        result = subprocess.run(
+                            ['bun', 'install'],
+                            cwd=work_dir,
+                            capture_output=True,
+                            text=True,
+                            timeout=600
+                        )
+                        print(result.stdout)
+                        if result.returncode != 0:
+                            print(f"bun install stderr: {result.stderr}")
+                        
+                        print("Building project with Bun...")
+                        result = subprocess.run(
+                            ['bun', 'run', 'build'],
+                            cwd=work_dir,
+                            capture_output=True,
+                            text=True,
+                            timeout=600
+                        )
+                        print(result.stdout)
+                        if result.returncode != 0:
+                            print(f"bun build stderr: {result.stderr}")
+                            send_response(event, context, 'FAILED', {}, 
+                                        reason=f"Build failed: {result.stderr}")
+                            return
+                    else:
+                        print("Installing dependencies...")
+                        result = subprocess.run(
+                            ['npm', 'ci', '--omit=dev'],
+                            cwd=work_dir,
+                            capture_output=True,
+                            text=True,
+                            timeout=600
+                        )
+                        print(result.stdout)
+                        if result.returncode != 0:
+                            print(f"npm install stderr: {result.stderr}")
+                        
+                        print("Building project...")
+                        result = subprocess.run(
+                            ['npm', 'run', 'build'],
                         cwd=work_dir,
                         capture_output=True,
                         text=True,

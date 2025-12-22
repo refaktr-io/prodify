@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-YGHFDKNCGT"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', 'G-YGHFDKNCGT');
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prodify - Migrate Lovable.dev Apps to AWS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        aws: {
+                            400: '#FF9900',
+                            500: '#FF9900',
+                            600: '#EC7211',
+                        },
+                        dark: {
+                            900: '#0F1117',
+                            800: '#161B22',
+                            700: '#21262D',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Space Grotesk', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Space Grotesk', sans-serif; }
+        .gradient-text {
+            background: linear-gradient(to right, #FF9900, #FFC46D);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .glass-panel {
+            background: rgba(22, 27, 34, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-dark-900 text-slate-300 min-h-screen flex flex-col">
+
+    <!-- Navigation -->
+    <nav class="fixed w-full z-50 glass-panel border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <span class="text-2xl font-bold text-white tracking-tight">Prodify</span>
+                </div>
+                <div class="hidden md:block">
+                    <div class="ml-10 flex items-baseline space-x-4">
+                        <a href="#features" class="hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors">Features</a>
+                        <a href="#converter" class="hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors">Converter</a>
+                        <a href="#consulting" class="hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors">Consulting</a>
+                    </div>
+                </div>
+                <div>
+                    <a href="#converter" class="bg-aws-500 hover:bg-aws-600 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-lg shadow-aws-500/20">
+                        Get Started
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="relative pt-32 pb-20 lg:pt-48 lg:pb-32 overflow-hidden">
+        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-full h-full z-0 pointer-events-none">
+            <div class="absolute top-20 left-1/4 w-96 h-96 bg-aws-500/10 rounded-full blur-3xl"></div>
+            <div class="absolute bottom-20 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl"></div>
+        </div>
+        
+        <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <h1 class="text-5xl md:text-7xl font-bold text-white tracking-tight mb-8">
+                Escape <span class="text-red-400">Lovable</span> lock-in.<br>
+                Scale on <span class="gradient-text">AWS</span>.
+            </h1>
+            <p class="mt-4 max-w-2xl mx-auto text-xl text-slate-400">
+                Migrate your Lovable.dev projects to your own AWS account. 
+                Gain full control, enterprise compliance, and cost-effective scaling without the platform markup.
+            </p>
+            <div class="mt-10 flex justify-center gap-4">
+                <a href="#converter" class="px-8 py-4 bg-white text-dark-900 font-bold rounded-lg hover:bg-slate-100 transition-colors shadow-xl">
+                    Migrate for Free
+                </a>
+                <a href="#consulting" class="px-8 py-4 glass-panel text-white font-semibold rounded-lg hover:bg-white/5 transition-colors">
+                    Book Consultation
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Value Prop Grid -->
+    <section id="features" class="py-20 bg-dark-800/50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- Feature 1 -->
+                <div class="p-8 rounded-2xl glass-panel hover:border-aws-500/50 transition-colors">
+                    <div class="w-12 h-12 bg-aws-500/20 rounded-lg flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-aws-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-3">Own Your Infrastructure</h3>
+                    <p class="text-slate-400">Stop renting your app's home. Deploy directly to your own AWS account and keep full ownership of your data and resources.</p>
+                </div>
+                <!-- Feature 2 -->
+                <div class="p-8 rounded-2xl glass-panel hover:border-aws-500/50 transition-colors">
+                    <div class="w-12 h-12 bg-aws-500/20 rounded-lg flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-aws-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-3">Drastically Lower Costs</h3>
+                    <p class="text-slate-400">
+                        Stop paying Lovable's <span class="text-red-400 font-semibold">$25/mo</span> ($300/yr) minimum just for hosting. 
+                        Switch to AWS S3 + CloudFront and pay only <span class="text-green-400 font-semibold">~$6/yr</span> for the exact same performance.
+                    </p>
+                </div>
+                <!-- Feature 3 -->
+                <div class="p-8 rounded-2xl glass-panel hover:border-aws-500/50 transition-colors">
+                    <div class="w-12 h-12 bg-aws-500/20 rounded-lg flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-aws-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-3">Enterprise Compliance</h3>
+                    <p class="text-slate-400">Meet SOC2, HIPAA, and GDPR requirements by hosting in your own controlled AWS environment.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main Tool Section (Free Tier) -->
+    <section id="converter" class="py-24 relative">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <span class="text-aws-500 font-semibold tracking-wider uppercase text-sm">Free Tier</span>
+                <h2 class="text-3xl md:text-4xl font-bold text-white mt-2">Static Site Converter</h2>
+                <p class="mt-4 text-slate-400">Upload your Lovable project export (.zip) and get a production-ready CloudFormation template.</p>
+            </div>
+
+            <div class="glass-panel rounded-3xl p-1 border border-white/10 shadow-2xl">
+                <div class="bg-dark-900/50 rounded-[20px] p-8 md:p-12 text-center border-2 border-dashed border-slate-700 hover:border-aws-500 transition-colors cursor-pointer group" id="drop-zone">
+                    <div class="mb-6">
+                        <div class="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto group-hover:bg-aws-500/20 transition-colors">
+                            <svg class="w-10 h-10 text-slate-400 group-hover:text-aws-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                        </div>
+                    </div>
+                    <h3 class="text-xl font-semibold text-white mb-2">Drag & Drop your project .zip here</h3>
+                    <p class="text-slate-500 mb-6">or click to browse files</p>
+                    <input type="file" id="file-input" class="hidden" accept=".zip">
+                    <button class="bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-lg font-medium transition-colors">
+                        Select File
+                    </button>
+                    <p class="mt-4 text-xs text-slate-600">Generates S3 + CloudFront CloudFormation Template</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Paid Tier / Consulting -->
+    <section id="consulting" class="py-24 bg-gradient-to-b from-dark-900 to-dark-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="glass-panel rounded-3xl p-8 md:p-16 flex flex-col md:flex-row items-center justify-between gap-12 border border-aws-500/30 relative overflow-hidden">
+                <div class="absolute top-0 right-0 w-64 h-64 bg-aws-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+                
+                <div class="md:w-1/2 relative z-10">
+                    <span class="text-aws-500 font-semibold tracking-wider uppercase text-sm">Pro / Custom</span>
+                    <h2 class="text-3xl md:text-4xl font-bold text-white mt-2 mb-6">Need more than static hosting?</h2>
+                    <p class="text-lg text-slate-300 mb-6">
+                        Scaling a complex application requires more than just S3. We offer expert consulting to help you architect and deploy full-stack solutions on AWS.
+                    </p>
+                    <ul class="space-y-3 text-slate-400">
+                        <li class="flex items-center"><svg class="w-5 h-5 text-aws-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>Database Migration (RDS, DynamoDB)</li>
+                        <li class="flex items-center"><svg class="w-5 h-5 text-aws-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>Authentication (Cognito)</li>
+                        <li class="flex items-center"><svg class="w-5 h-5 text-aws-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>AI Agents & Bedrock Integration</li>
+                        <li class="flex items-center"><svg class="w-5 h-5 text-aws-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>Custom Backend Logic (Lambda)</li>
+                    </ul>
+                </div>
+                <div class="md:w-1/3 relative z-10">
+                    <div class="bg-dark-900 p-8 rounded-2xl border border-slate-700 shadow-xl">
+                        <h3 class="text-xl font-bold text-white mb-2">Book a Consultation</h3>
+                        <p class="text-slate-400 text-sm mb-6">Get a custom migration plan tailored to your app's needs.</p>
+                        <form class="space-y-4" onsubmit="event.preventDefault(); alert('Thanks for your interest! We will contact you shortly.');">
+                            <div>
+                                <label class="block text-xs font-medium text-slate-400 mb-1">Email Address</label>
+                                <input type="email" class="w-full bg-dark-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-aws-500" placeholder="you@company.com">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-slate-400 mb-1">Project Type</label>
+                                <select class="w-full bg-dark-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-aws-500">
+                                    <option>Full Stack App</option>
+                                    <option>AI Agent</option>
+                                    <option>SaaS Platform</option>
+                                    <option>Other</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="w-full bg-aws-500 hover:bg-aws-600 text-white font-bold py-3 rounded-lg transition-colors">
+                                Request Call
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-dark-900 border-t border-white/5 py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center">
+            <div class="mb-4 md:mb-0">
+                <span class="text-xl font-bold text-white">Prodify</span>
+                <p class="text-slate-500 text-sm mt-1">© 2025 Prodify. All rights reserved.</p>
+            </div>
+            <div class="flex space-x-6">
+                <a href="#" class="text-slate-400 hover:text-white transition-colors">Privacy</a>
+                <a href="#" class="text-slate-400 hover:text-white transition-colors">Terms</a>
+                <a href="#" class="text-slate-400 hover:text-white transition-colors">Contact</a>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Drag and Drop Logic
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-aws-500', 'bg-aws-500/10');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-aws-500', 'bg-aws-500/10');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-aws-500', 'bg-aws-500/10');
+            
+            if (e.dataTransfer.files.length) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (fileInput.files.length) {
+                handleFile(fileInput.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            if (file.name.endsWith('.zip')) {
+                // Mock processing
+                const originalText = dropZone.innerHTML;
+                dropZone.innerHTML = `
+                    <div class="animate-pulse">
+                        <div class="w-16 h-16 border-4 border-aws-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                        <h3 class="text-xl font-semibold text-white">Generating CloudFormation Template...</h3>
+                        <p class="text-slate-400 mt-2">Analyzing ${file.name}</p>
+                    </div>
+                `;
+                
+                // Simulate delay
+                setTimeout(() => {
+                    dropZone.innerHTML = `
+                        <div class="text-center">
+                            <div class="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <svg class="w-10 h-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                            </div>
+                            <h3 class="text-xl font-semibold text-white mb-2">Template Ready!</h3>
+                            <p class="text-slate-400 mb-6">Your AWS infrastructure code has been generated.</p>
+                            <button class="bg-aws-500 hover:bg-aws-600 text-white px-8 py-3 rounded-lg font-bold transition-colors shadow-lg" onclick="location.reload()">
+                                Download template.yaml
+                            </button>
+                        </div>
+                    `;
+                }, 2000);
+            } else {
+                alert('Please upload a .zip file');
+            }
+        }
+    </script>
+</body>
+</html>

@@ -164,6 +164,7 @@ Resources:
       Environment:
         Variables:
           STAGING_BUCKET: !Ref StagingBucket
+          DEPLOYER_IMAGE_REGIONS: !Join [',', !Ref DeployerImageRegions]
       Timeout: 30
 
   StatusPermission:

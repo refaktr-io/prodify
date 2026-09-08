@@ -55,7 +55,8 @@ Stack lifecycle behaves the way you'd expect: **delete** empties the bucket firs
 Other constraints:
 
 - The generated template's source link is valid for about **two hours**. Deploy soon after generating; to deploy later, upload again.
-- Stacks can be created in any region where the deployer image is replicated (`DeployerImageRegions`; the hosted service lists the current regions in the template's `Rules`).
+- Stacks can be created in any region where the deployer image is replicated (`DeployerImageRegions`; the `/status` response lists them as `supportedRegions`, and the template's `Rules` block rejects others).
+- **Accounts created with AWS's new sign-up experience are locked to one region** (us-east-2, eu-north-1, or ap-southeast-2, chosen from your contact address) and cannot create stacks in us-east-1 — the console shows an SCP "explicit deny". Open the deploy link with `region=` set to your project's region; all three are supported. Custom domains need an ACM certificate in us-east-1, which those accounts can't create, so use the CloudFront URL there.
 - The hosted API is unauthenticated and rate-limited; use it for real projects, not load tests.
 
 ## Deploy your own instance

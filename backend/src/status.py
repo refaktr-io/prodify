@@ -7,6 +7,11 @@ from botocore.exceptions import ClientError
 s3 = boto3.client('s3')
 BUCKET_NAME = os.environ['STAGING_BUCKET']
 REGION = os.environ.get('AWS_REGION', 'us-east-1')
+# Regions the generated template can be deployed in (deployer image replicated
+# there). Clients use this to build the console link: accounts from AWS's new
+# sign-up experience are locked to one region (us-east-2 / eu-north-1 /
+# ap-southeast-2) and can't create stacks in us-east-1.
+SUPPORTED_REGIONS = [r.strip() for r in os.environ.get('DEPLOYER_IMAGE_REGIONS', 'us-east-1').split(',') if r.strip()]
 
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
@@ -47,6 +52,7 @@ def handler(event, context):
         return respond({
             'status': 'READY',
             'templateUrl': f"https://{BUCKET_NAME}.s3.{REGION}.amazonaws.com/{template_key}",
+            'supportedRegions': SUPPORTED_REGIONS,
         })
 
     if object_exists(error_key):

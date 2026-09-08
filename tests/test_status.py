@@ -21,6 +21,7 @@ def test_ready_returns_plain_regional_url():
     assert body['status'] == 'READY'
     assert body['templateUrl'] == 'https://test-staging-bucket.s3.us-east-1.amazonaws.com/generated/abc/template.yaml'
     assert 'X-Amz' not in body['templateUrl']
+    assert body['supportedRegions'] == ['us-east-1', 'eu-west-1']
 
 
 def test_pending_when_nothing_generated_yet():

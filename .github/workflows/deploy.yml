@@ -9,20 +9,31 @@ on:
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
+# Forks: set repository variables AWS_DEPLOY_ROLE_ARN (from the
+# github-oidc.yaml stack output) and optionally DEPLOYMENT_BUCKET,
+# STACK_NAME, AWS_REGION.
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  DEPLOYMENT_BUCKET: ${{ vars.DEPLOYMENT_BUCKET || 'prodify-backend' }}
+  STACK_NAME: ${{ vars.STACK_NAME || 'prodify-backend' }}
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v5
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       # The key includes the commit SHA so CloudFormation sees a property
       # change and updates the function code (a static key never redeploys).
@@ -30,21 +41,23 @@ jobs:
         run: |
           cd backend/src
           zip -r ../lambda-code.zip *.py
-          aws s3 cp ../lambda-code.zip s3://prodify-backend/lambda-code-${GITHUB_SHA}.zip
+          aws s3 cp ../lambda-code.zip "s3://${DEPLOYMENT_BUCKET}/lambda-code-${GITHUB_SHA}.zip"
 
       - name: Deploy CloudFormation Stack
         run: |
           cd backend
           aws cloudformation deploy \
             --template-file infrastructure/template.yaml \
-            --stack-name prodify-backend \
-            --parameter-overrides LambdaCodeKey=lambda-code-${GITHUB_SHA}.zip \
+            --stack-name "$STACK_NAME" \
+            --parameter-overrides \
+              "DeploymentPackageBucket=${DEPLOYMENT_BUCKET}" \
+              "LambdaCodeKey=lambda-code-${GITHUB_SHA}.zip" \
             --capabilities CAPABILITY_IAM \
             --no-fail-on-empty-changeset
 
       - name: Show API URL
         run: |
           aws cloudformation describe-stacks \
-            --stack-name prodify-backend \
+            --stack-name "$STACK_NAME" \
             --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' \
             --output text

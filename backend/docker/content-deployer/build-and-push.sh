@@ -1,38 +1,40 @@
 #!/bin/bash
-set -e
+# Build the content-deployer image for arm64, push it to ECR, apply the
+# repository/lifecycle policies, and print the digest to pin in the
+# backend stack's DeployerImageUri parameter.
+#
+# Usage: AWS_PROFILE=<profile> AWS_REGION=<region> ./build-and-push.sh [tag]
+set -euo pipefail
 
-# Configuration
-AWS_REGION="us-east-1"
-AWS_PROFILE="refaktr"
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --profile $AWS_PROFILE --region $AWS_REGION)
-ECR_REPO_NAME="prodify-content-deployer"
-IMAGE_TAG="latest"
-ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}"
+AWS_REGION="${AWS_REGION:-us-east-1}"
+AWS_PROFILE="${AWS_PROFILE:-default}"
+ECR_REPO_NAME="${ECR_REPO_NAME:-prodify-content-deployer}"
+IMAGE_TAG="${1:-$(date +%Y%m%d-%H%M%S)}"
 
-echo "Building and pushing Content Deployer Lambda container..."
-echo "AWS Account: $ACCOUNT_ID"
-echo "ECR Repository: $ECR_URI"
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --profile "$AWS_PROFILE" --region "$AWS_REGION")
+REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+ECR_URI="${REGISTRY}/${ECR_REPO_NAME}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Create ECR repository if it doesn't exist
-aws ecr describe-repositories --repository-names $ECR_REPO_NAME --profile $AWS_PROFILE --region $AWS_REGION 2>/dev/null || \
-    aws ecr create-repository --repository-name $ECR_REPO_NAME --profile $AWS_PROFILE --region $AWS_REGION
+echo "Account: $ACCOUNT_ID  Region: $AWS_REGION  Repo: $ECR_URI  Tag: $IMAGE_TAG"
 
-# Login to ECR
-aws ecr get-login-password --profile $AWS_PROFILE --region $AWS_REGION | \
-    docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+aws ecr describe-repositories --repository-names "$ECR_REPO_NAME" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null 2>&1 || \
+    aws ecr create-repository --repository-name "$ECR_REPO_NAME" --image-scanning-configuration scanOnPush=true --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null
 
-# Build the Docker image for ARM64 (Lambda Graviton2)
-cd "$(dirname "$0")"
-docker buildx build --platform linux/arm64 -t ${ECR_REPO_NAME}:${IMAGE_TAG} --load .
+# Generated templates run in other accounts, so Lambda there must be able to pull this image.
+aws ecr set-repository-policy --repository-name "$ECR_REPO_NAME" --policy-text "file://${SCRIPT_DIR}/ecr-repository-policy.json" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null
+aws ecr put-lifecycle-policy --repository-name "$ECR_REPO_NAME" --lifecycle-policy-text "file://${SCRIPT_DIR}/ecr-lifecycle-policy.json" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null
 
-# Tag the image
-docker tag ${ECR_REPO_NAME}:${IMAGE_TAG} ${ECR_URI}:${IMAGE_TAG}
+aws ecr get-login-password --profile "$AWS_PROFILE" --region "$AWS_REGION" | \
+    docker login --username AWS --password-stdin "$REGISTRY"
 
-# Push to ECR
-docker push ${ECR_URI}:${IMAGE_TAG}
+docker buildx build --platform linux/arm64 --provenance=false -t "${ECR_URI}:${IMAGE_TAG}" --push "$SCRIPT_DIR"
 
-echo ""
-echo "✅ Successfully pushed image to ECR"
-echo "Image URI: ${ECR_URI}:${IMAGE_TAG}"
-echo ""
-echo "Update your CloudFormation template to use this image URI in the ContentDeployer Lambda function."
+DIGEST=$(aws ecr describe-images --repository-name "$ECR_REPO_NAME" --image-ids imageTag="$IMAGE_TAG" --query 'imageDetails[0].imageDigest' --output text --profile "$AWS_PROFILE" --region "$AWS_REGION")
+
+echo
+echo "Pushed ${ECR_URI}:${IMAGE_TAG}"
+echo "Digest: ${DIGEST}"
+echo
+echo "Deploy the backend with:"
+echo "  --parameter-overrides DeployerImageUri=${ECR_URI}@${DIGEST}"

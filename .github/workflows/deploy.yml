@@ -6,14 +6,13 @@ on:
       - main
     paths:
       - 'backend/**'
-      - 'frontend/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -25,11 +24,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
+      # The key includes the commit SHA so CloudFormation sees a property
+      # change and updates the function code (a static key never redeploys).
       - name: Package Lambda Code
         run: |
           cd backend/src
           zip -r ../lambda-code.zip *.py
-          aws s3 cp ../lambda-code.zip s3://prodify-backend/lambda-code.zip
+          aws s3 cp ../lambda-code.zip s3://prodify-backend/lambda-code-${GITHUB_SHA}.zip
 
       - name: Deploy CloudFormation Stack
         run: |
@@ -37,46 +38,13 @@ jobs:
           aws cloudformation deploy \
             --template-file infrastructure/template.yaml \
             --stack-name prodify-backend \
+            --parameter-overrides LambdaCodeKey=lambda-code-${GITHUB_SHA}.zip \
             --capabilities CAPABILITY_IAM \
             --no-fail-on-empty-changeset
 
-      - name: Get API URL
-        id: get-api-url
+      - name: Show API URL
         run: |
-          API_URL=$(aws cloudformation describe-stacks \
+          aws cloudformation describe-stacks \
             --stack-name prodify-backend \
             --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' \
-            --output text)
-          echo "API_URL=$API_URL" >> $GITHUB_OUTPUT
-          echo "Deployed API URL: $API_URL"
-
-      - name: Update Frontend
-        run: |
-          sed -i "s|const API_BASE_URL = '.*';|const API_BASE_URL = '${{ steps.get-api-url.outputs.API_URL }}';|g" frontend/index.html
-          echo "Updated frontend/index.html with API URL"
-
-      - name: Deploy Frontend to S3
-        run: |
-          aws s3 cp frontend/index.html s3://refaktr.io/prodify/index.html \
-            --content-type "text/html" \
-            --cache-control "max-age=300"
-          echo "Deployed frontend to s3://refaktr.io/prodify/index.html"
-
-      - name: Invalidate CloudFront Cache
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id E1KCOUEOAKPFU3 \
-            --paths "/prodify/index.html"
-          echo "Created CloudFront invalidation for /prodify/index.html"
-
-      - name: Commit updated frontend
-        run: |
-          git config --global user.name 'GitHub Actions'
-          git config --global user.email 'actions@github.com'
-          git add frontend/index.html
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Update frontend with deployed API URL [skip ci]"
-            git push
-          fi
+            --output text

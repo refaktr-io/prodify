@@ -7,12 +7,25 @@ Parameters:
     Default: prodify-backend
     Description: S3 bucket where Lambda deployment packages are stored
 
+  LambdaCodeKey:
+    Type: String
+    Default: lambda-code.zip
+    Description: S3 key of the Lambda deployment package (unique per deploy so CloudFormation picks up code changes)
+
 Resources:
   # S3 Staging Bucket
   StagingBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: prodify-staging
+      # ACLs stay blocked; policy-based public access is allowed so the
+      # generated/* prefix can be read anonymously (quick-create template URLs
+      # must be short-lived-token-free or the console sign-in redirect breaks).
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
       CorsConfiguration:
         CorsRules:
           - AllowedHeaders: ['*']
@@ -24,6 +37,21 @@ Resources:
           - Id: DeleteAfter24Hours
             Status: Enabled
             ExpirationInDays: 1
+
+  # Anonymous read of generated templates only. Keys contain an unguessable
+  # UUID and objects expire via the lifecycle rule above; uploads/* stays private.
+  StagingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StagingBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadGeneratedTemplates
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub "${StagingBucket.Arn}/generated/*"
 
   # Lambda Execution Role
   LambdaExecutionRole:
@@ -63,7 +91,7 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         S3Bucket: !Ref DeploymentPackageBucket
-        S3Key: lambda-code.zip
+        S3Key: !Ref LambdaCodeKey
       Environment:
         Variables:
           STAGING_BUCKET: !Ref StagingBucket
@@ -87,7 +115,7 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         S3Bucket: !Ref DeploymentPackageBucket
-        S3Key: lambda-code.zip
+        S3Key: !Ref LambdaCodeKey
       Environment:
         Variables:
           STAGING_BUCKET: !Ref StagingBucket
@@ -111,7 +139,7 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         S3Bucket: !Ref DeploymentPackageBucket
-        S3Key: lambda-code.zip
+        S3Key: !Ref LambdaCodeKey
       Environment:
         Variables:
           STAGING_BUCKET: !Ref StagingBucket

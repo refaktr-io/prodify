@@ -25,7 +25,8 @@ for region in "$@"; do
   [ "$region" = "$SOURCE_REGION" ] && continue
   echo "Preparing $ECR_REPO_NAME in $region"
   aws ecr describe-repositories --repository-names "$ECR_REPO_NAME" --profile "$AWS_PROFILE" --region "$region" >/dev/null 2>&1 || \
-    aws ecr create-repository --repository-name "$ECR_REPO_NAME" --image-scanning-configuration scanOnPush=true --profile "$AWS_PROFILE" --region "$region" >/dev/null
+    aws ecr create-repository --repository-name "$ECR_REPO_NAME" --image-scanning-configuration scanOnPush=true --tags Key=Project,Value=Prodify --profile "$AWS_PROFILE" --region "$region" >/dev/null
+  aws ecr tag-resource --resource-arn "arn:aws:ecr:${region}:${ACCOUNT_ID}:repository/${ECR_REPO_NAME}" --tags Key=Project,Value=Prodify --profile "$AWS_PROFILE" --region "$region"
   aws ecr set-repository-policy --repository-name "$ECR_REPO_NAME" --policy-text "file://${SCRIPT_DIR}/ecr-repository-policy.json" --profile "$AWS_PROFILE" --region "$region" >/dev/null
   aws ecr put-lifecycle-policy --repository-name "$ECR_REPO_NAME" --lifecycle-policy-text "file://${SCRIPT_DIR}/ecr-lifecycle-policy.json" --profile "$AWS_PROFILE" --region "$region" >/dev/null
   DESTINATIONS="${DESTINATIONS}{\"region\":\"${region}\",\"registryId\":\"${ACCOUNT_ID}\"},"

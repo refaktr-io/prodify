@@ -66,6 +66,7 @@ jobs:
               "AlarmEmail=${ALARM_EMAIL}" \
               "DeployerImageRegions=${DEPLOYER_IMAGE_REGIONS}" \
               "DeployerImageDigest=${DIGEST}" \
+            --tags Project=Prodify \
             --capabilities CAPABILITY_IAM \
             --no-fail-on-empty-changeset
 

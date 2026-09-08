@@ -19,7 +19,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "Account: $ACCOUNT_ID  Region: $AWS_REGION  Repo: $ECR_URI  Tag: $IMAGE_TAG"
 
 aws ecr describe-repositories --repository-names "$ECR_REPO_NAME" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null 2>&1 || \
-    aws ecr create-repository --repository-name "$ECR_REPO_NAME" --image-scanning-configuration scanOnPush=true --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null
+    aws ecr create-repository --repository-name "$ECR_REPO_NAME" --image-scanning-configuration scanOnPush=true --tags Key=Project,Value=Prodify --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null
+aws ecr tag-resource --resource-arn "arn:aws:ecr:${AWS_REGION}:${ACCOUNT_ID}:repository/${ECR_REPO_NAME}" --tags Key=Project,Value=Prodify --profile "$AWS_PROFILE" --region "$AWS_REGION"
 
 # Generated templates run in other accounts, so Lambda there must be able to pull this image.
 aws ecr set-repository-policy --repository-name "$ECR_REPO_NAME" --policy-text "file://${SCRIPT_DIR}/ecr-repository-policy.json" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null

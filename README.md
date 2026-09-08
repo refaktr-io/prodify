@@ -65,6 +65,7 @@ You need the AWS CLI, Docker (with buildx), and an AWS account.
 ```bash
 # 1. Bucket for Lambda deployment packages
 aws s3 mb s3://<deployment-bucket>
+aws s3api put-bucket-tagging --bucket <deployment-bucket> --tagging 'TagSet=[{Key=Project,Value=Prodify}]'
 
 # 2. Build and push the deployer image; prints the digest to pin
 AWS_PROFILE=<profile> backend/docker/content-deployer/build-and-push.sh
@@ -85,12 +86,15 @@ aws cloudformation deploy \
     DeployerImageDigest=<digest from step 2> \
     DeployerImageRegions=us-east-1,us-west-2,eu-west-1 \
     AlarmEmail=you@example.com \
+  --tags Project=Prodify \
   --capabilities CAPABILITY_IAM
 ```
 
+Stack tags propagate to every taggable resource, and `Project` is meant to be activated as a cost allocation tag (`aws ce update-cost-allocation-tags-status --cost-allocation-tags-status TagKey=Project,Status=Active`) so Prodify's cost shows up as its own line in Cost Explorer. The scripts tag the ECR repositories the same way.
+
 The `ApiUrl` output is what a frontend calls (`POST /upload-request`, `GET /status/{requestId}`). Confirm the SNS subscription email to receive alarms. The staging bucket name is auto-generated unless you pass `StagingBucketName`.
 
-**Continuous deployment:** deploy `backend/infrastructure/github-oidc.yaml` once (`--capabilities CAPABILITY_NAMED_IAM`), set its `DeployRoleArn` output as the `AWS_DEPLOY_ROLE_ARN` repository variable, and pushes to `main` deploy via [deploy.yml](.github/workflows/deploy.yml). Optional variables: `AWS_REGION`, `DEPLOYMENT_BUCKET`, `STACK_NAME`, `STAGING_BUCKET_NAME`, `ALARM_EMAIL`, `DEPLOYER_IMAGE_REGIONS`.
+**Continuous deployment:** deploy `backend/infrastructure/github-oidc.yaml` once (`--capabilities CAPABILITY_NAMED_IAM --tags Project=Prodify`), set its `DeployRoleArn` output as the `AWS_DEPLOY_ROLE_ARN` repository variable, and pushes to `main` deploy via [deploy.yml](.github/workflows/deploy.yml). Optional variables: `AWS_REGION`, `DEPLOYMENT_BUCKET`, `STACK_NAME`, `STAGING_BUCKET_NAME`, `ALARM_EMAIL`, `DEPLOYER_IMAGE_REGIONS`.
 
 ## Development
 

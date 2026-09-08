@@ -25,6 +25,7 @@ aws s3 cp /tmp/lambda-code.zip s3://prodify-backend/$KEY --profile refaktr
 aws cloudformation deploy --template-file backend/infrastructure/template.yaml \
   --stack-name prodify-backend \
   --parameter-overrides LambdaCodeKey=$KEY StagingBucketName=prodify-staging AlarmEmail=prodify@refaktr.io \
+  --tags Project=Prodify \
   --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset --profile refaktr --region us-east-1
 
 AWS_PROFILE=refaktr backend/docker/content-deployer/build-and-push.sh      # new deployer image; prints digest
@@ -37,6 +38,7 @@ Rules that bite:
 - **`StagingBucketName` must be passed as `prodify-staging` for the maintainer stack** (CI does this via a repository variable). Leaving it empty auto-generates a name, which would replace the live bucket.
 - The Lambda zip must include `templates/`; `generator.py` reads `templates/site-template.yaml` at runtime.
 - A new deployer image means a new digest: update the `DeployerImageDigest` default in `template.yaml` (that's the committed source of truth) and deploy.
+- **Every Prodify resource carries `Project=Prodify`**, activated as a cost allocation tag. Stacks get it via `--tags` (propagates to resources); the ECR scripts tag repositories; anything created by hand (deployment bucket, log groups) must be tagged by hand.
 - **`cloudformation deploy` keeps an existing stack's previous value for every parameter you don't pass.** Changing a template default does nothing to the live stack; CI therefore passes every parameter explicitly (it greps the digest out of the template). When deploying by hand, pass `DeployerImageDigest` too.
 
 ## Architecture

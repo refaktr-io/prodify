@@ -63,6 +63,23 @@ aws cloudformation deploy \
 ### Deploy Frontend
 Upload `frontend/index.html` to S3 with static hosting enabled.
 
+## Working with AI coding agents
+
+This repo is set up for the [Agent Toolkit for AWS](https://github.com/aws/agent-toolkit-for-aws), which gives coding agents AWS skills plus the AWS MCP Server (sandboxed AWS API access and documentation search).
+
+**One-time machine setup** (installs the AWS CLI, signs in via browser, configures the toolkit — no access keys needed). Paste this into your agent:
+
+```
+Set up Agent Toolkit for AWS by following instructions:
+https://raw.githubusercontent.com/aws/agent-toolkit-for-aws/refs/heads/main/setup-instructions/setup.md
+```
+
+**Per-agent notes**
+
+- **Claude Code** — `.claude/settings.json` registers the toolkit marketplace and enables the `aws-core` plugin. Run `claude plugin install aws-core@agent-toolkit-for-aws` once; the AWS rules in `CLAUDE.md` load automatically.
+- **Codex** — `codex plugin marketplace add aws/agent-toolkit-for-aws`, then `/plugins` → install `aws-core`.
+- **Cursor** — Settings → Plugins → Team Marketplaces → Import from Repo → `aws/agent-toolkit-for-aws`, then install `aws-core`.
+
 ## Cost Analysis
 
 | Service | Lovable | AWS (Prodify) |

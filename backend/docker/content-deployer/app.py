@@ -25,6 +25,18 @@ import boto3
 WORK_ROOT = '/tmp/project'
 STATE_KEY = '.prodify/state.json'
 SKIP_DIRS = {'node_modules', '__MACOSX', '.git'}
+# Cloudflare/Netlify routing files that Nitro emits; meaningless on S3.
+SKIP_FILES = {'_headers', '_redirects', '_routes.json'}
+# Vite writes dist/, CRA writes build/, Nitro-based frameworks (TanStack
+# Start) write .output/public/ - which only holds an index.html when
+# prerendering is enabled; otherwise it's just assets for an SSR server.
+OUTPUT_DIRS = ('dist', 'build', os.path.join('.output', 'public'))
+TANSTACK_PRERENDER_HINT = (
+    "This is a TanStack Start project (Lovable's current template); its build produces a server "
+    "bundle, not a static site. In vite.config.ts add "
+    "tanstackStart: { prerender: { enabled: true, crawlLinks: true, autoStaticPathsDiscovery: true } } "
+    "and upload again - the build then writes a static site to .output/public."
+)
 BUILD_TIMEOUT_MARGIN_SECONDS = 90
 MAX_REASON_CHARS = 1500
 
@@ -155,11 +167,27 @@ def download_and_extract(source_url):
 
 
 def find_build_output(project_dir):
-    for name in ('dist', 'build'):
+    """First conventional output directory that actually contains an index.html."""
+    for name in OUTPUT_DIRS:
         candidate = os.path.join(project_dir, name)
-        if os.path.isdir(candidate) and os.listdir(candidate):
+        if os.path.isfile(os.path.join(candidate, 'index.html')):
             return candidate
     return None
+
+
+def uses_package(project_dir, package_name):
+    try:
+        with open(os.path.join(project_dir, 'package.json')) as f:
+            pkg = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return any(package_name in pkg.get(section, {}) for section in ('dependencies', 'devDependencies'))
+
+
+def no_output_message(project_dir):
+    if uses_package(project_dir, '@tanstack/react-start'):
+        return TANSTACK_PRERENDER_HINT
+    return "The build finished but produced no dist/, build/, or .output/public folder containing an index.html."
 
 
 def run(cmd, cwd, timeout):
@@ -196,7 +224,7 @@ def build_project(project_dir, context):
 
     output = find_build_output(project_dir)
     if not output:
-        raise DeployError("The build finished but produced no dist/ or build/ folder.")
+        raise DeployError(no_output_message(project_dir))
     return output
 
 
@@ -222,7 +250,7 @@ def collect_files(deploy_dir):
     for root, dirs, names in os.walk(deploy_dir):
         dirs[:] = [d for d in dirs if not d.startswith('.') and d not in SKIP_DIRS]
         for name in names:
-            if name.startswith('.'):
+            if name.startswith('.') or name in SKIP_FILES:
                 continue
             path = os.path.join(root, name)
             key = os.path.relpath(path, deploy_dir).replace(os.sep, '/')

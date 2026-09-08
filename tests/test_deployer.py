@@ -118,6 +118,36 @@ def test_build_env_installs_dev_dependencies():
     assert app.BUILD_ENV['npm_config_cache'].startswith('/tmp')
 
 
+def test_find_build_output_requires_index_html_and_knows_nitro_output(tmp_path):
+    (tmp_path / 'dist').mkdir()
+    (tmp_path / 'dist' / 'assets.js').write_text('x')          # no index.html: not deployable
+    out = tmp_path / '.output' / 'public'
+    out.mkdir(parents=True)
+    (out / 'index.html').write_text('<html>prerendered</html>')
+    assert app.find_build_output(str(tmp_path)) == str(out)
+
+
+def test_find_build_output_prefers_dist_when_it_has_index(tmp_path):
+    (tmp_path / 'dist').mkdir()
+    (tmp_path / 'dist' / 'index.html').write_text('x')
+    assert app.find_build_output(str(tmp_path)) == str(tmp_path / 'dist')
+    assert app.find_build_output(str(tmp_path / 'nowhere')) is None
+
+
+def test_no_output_message_is_actionable_for_tanstack_start(tmp_path):
+    (tmp_path / 'package.json').write_text(json.dumps({'dependencies': {'@tanstack/react-start': '1.0.0'}}))
+    assert 'prerender' in app.no_output_message(str(tmp_path))
+    (tmp_path / 'package.json').write_text(json.dumps({'dependencies': {'react': '18'}}))
+    assert '.output/public' in app.no_output_message(str(tmp_path))
+
+
+def test_collect_files_skips_cloudflare_routing_files(tmp_path):
+    (tmp_path / 'index.html').write_text('x')
+    (tmp_path / '_headers').write_text('x')
+    (tmp_path / '_redirects').write_text('x')
+    assert set(app.collect_files(str(tmp_path))) == {'index.html'}
+
+
 def test_collect_files_skips_hidden_and_node_modules(tmp_path):
     (tmp_path / 'index.html').write_text('x')
     (tmp_path / 'assets').mkdir()

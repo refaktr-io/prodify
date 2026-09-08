@@ -48,9 +48,22 @@ Stack lifecycle behaves the way you'd expect: **delete** empties the bucket firs
 
 | Works | Doesn't (yet) |
 |---|---|
-| Static Vite/React single-page apps, which is what Lovable exports | Server-side rendering (TanStack Start, Next.js server features) |
-| Projects with `bun.lockb`/`bun.lock` (bun) or `package-lock.json` (npm) | Anything needing a backend: Lovable Cloud / Supabase auth, database, storage, edge functions keep pointing at their current host |
-| Zips that already contain `dist/` or `build/` (no build step runs) | Uploads over 50 MB — leave out `node_modules` and build output |
+| Static Vite/React single-page apps (Lovable's classic template) | Anything that needs a server at runtime: server functions, SSR-only loaders, API routes |
+| TanStack Start projects (Lovable's current template) **with prerendering enabled** — see below | Anything needing a backend: Lovable Cloud / Supabase auth, database, storage, edge functions keep pointing at their current host |
+| `bun.lock`/`bun.lockb` (bun) or `package-lock.json` (npm); zips that already contain `dist/`, `build/`, or `.output/public/` | Uploads over 50 MB — leave out `node_modules` and build output |
+
+**TanStack Start (Lovable's current template):** by default `vite build` targets Cloudflare Workers and produces a server bundle, so there's nothing static to host. Turn on prerendering in `vite.config.ts`:
+
+```ts
+export default defineConfig({
+  tanstackStart: {
+    server: { entry: "server" },
+    prerender: { enabled: true, crawlLinks: true, autoStaticPathsDiscovery: true },
+  },
+});
+```
+
+The build then writes a complete static site to `.output/public/`, which Prodify deploys. Every route is rendered at build time; the deployer tells you exactly this if you upload without it.
 
 Other constraints:
 

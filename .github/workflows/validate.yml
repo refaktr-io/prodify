@@ -1,0 +1,35 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'tests/**'
+      - 'requirements-dev.txt'
+      - '.github/workflows/validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint CloudFormation templates
+        run: cfn-lint backend/infrastructure/*.yaml
+
+      - name: Tests (includes cfn-lint of a rendered site template)
+        run: pytest -q

@@ -1,67 +1,115 @@
 # Prodify
 
-Migrate Lovable.dev apps to AWS. Stop paying $300/yr for hosting. Deploy to S3 + CloudFront for ~$6/yr.
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-## Features
+Turn a [Lovable](https://lovable.dev) project export into a CloudFormation stack that hosts the site on S3 + CloudFront in **your own AWS account**. Upload the zip, get a one-click "Deploy to AWS" link.
 
-**Free Tier:** Upload a .zip of your Lovable project → Get a one-click CloudFormation template that deploys to S3 + CloudFront
+Hosted version: **https://refaktr.io/prodify/**
 
-**Paid Tier:** Custom consulting for complex migrations (databases, auth, AI agents, backends)
+## How it works
 
-## Architecture
+```mermaid
+sequenceDiagram
+    participant U as You
+    participant P as Prodify API (Prodify's account)
+    participant S as Staging bucket
+    participant C as CloudFormation (your account)
+    participant D as ContentDeployer Lambda (your account)
 
+    U->>P: POST /upload-request
+    P-->>U: presigned upload URL + requestId
+    U->>S: PUT source.zip
+    S->>P: S3 event → generator
+    P->>S: write generated/{requestId}/template.yaml
+    U->>P: GET /status/{requestId}
+    P-->>U: READY + template URL
+    U->>C: Quick-create stack from template URL
+    C->>D: Custom::ContentDeployer (Create)
+    D->>S: download source.zip (presigned, ~2h)
+    D->>D: bun/npm build if no dist/
+    D->>C: upload to site bucket → SUCCESS
+    C-->>U: CloudFront URL
 ```
-prodify/
-├── frontend/              # Landing page
-│   └── index.html
-├── backend/
-│   ├── infrastructure/
-│   │   └── template.yaml  # CloudFormation template
-│   └── src/               # Lambda functions
-│       ├── upload_request.py
-│       ├── status.py
-│       └── generator.py
-└── .github/workflows/     # CI/CD
-    └── deploy.yml
-```
 
-### How It Works
+Two accounts are involved on purpose. Prodify's account only ever *reads* your zip to write a template; it never runs your code. The build (`bun install && bun run build`) happens inside a Lambda function that the generated stack creates in **your** account, using a container image Prodify publishes.
 
-1. User uploads .zip → Gets presigned S3 upload URL
-2. File uploads to S3 → Triggers Generator Lambda
-3. Generator creates CloudFormation template with embedded content deployer
-4. User gets "Deploy to AWS" button → Opens AWS Console with pre-loaded stack
+## What you get
 
-## Deployment
+The generated stack creates:
 
-### Prerequisites
-- AWS Account
-- GitHub repository secrets:
-  - `AWS_ACCESS_KEY_ID`
-  - `AWS_SECRET_ACCESS_KEY`
+- A private S3 bucket (Block Public Access on, SSE-S3) holding the built site
+- A CloudFront distribution with Origin Access Control, HTTPS redirect, HTTP/2+3, compression, the managed security-headers policy, and SPA routing (403/404 → `index.html`)
+- A `ContentDeployer` Lambda (container image, arm64) that downloads, builds, and syncs the site, sets `Cache-Control` (`no-cache` for HTML, `immutable` for `assets/*`), and invalidates CloudFront on updates
+- Optional custom domain: pass `DomainName` and `AcmCertificateArn` (certificate must be in `us-east-1`), then point a CNAME or Route 53 alias at the `CloudFrontDomainName` output
 
-### Deploy Backend
-Push to `main` branch triggers GitHub Actions to:
-1. Package Lambda code → Upload to S3
-2. Deploy CloudFormation stack
-3. Update frontend with API URL
+Stack lifecycle behaves the way you'd expect: **delete** empties the bucket first so the stack removes cleanly; **update** is a no-op unless the source URL changed, and a rollback to the previously deployed source never re-downloads.
 
-Or deploy manually:
+## Compatibility and limits
+
+| Works | Doesn't (yet) |
+|---|---|
+| Static Vite/React single-page apps, which is what Lovable exports | Server-side rendering (TanStack Start, Next.js server features) |
+| Projects with `bun.lockb`/`bun.lock` (bun) or `package-lock.json` (npm) | Anything needing a backend: Lovable Cloud / Supabase auth, database, storage, edge functions keep pointing at their current host |
+| Zips that already contain `dist/` or `build/` (no build step runs) | Uploads over 50 MB — leave out `node_modules` and build output |
+
+Other constraints:
+
+- The generated template's source link is valid for about **two hours**. Deploy soon after generating; to deploy later, upload again.
+- Stacks can be created in any region where the deployer image is replicated (`DeployerImageRegions`; the hosted service lists the current regions in the template's `Rules`).
+- The hosted API is unauthenticated and rate-limited; use it for real projects, not load tests.
+
+## Deploy your own instance
+
+You need the AWS CLI, Docker (with buildx), and an AWS account.
+
 ```bash
-cd backend/src
-zip -r ../lambda-code.zip *.py
-aws s3 cp ../lambda-code.zip s3://prodify-deploy-<ACCOUNT_ID>-us-east-1/
+# 1. Bucket for Lambda deployment packages
+aws s3 mb s3://<deployment-bucket>
 
-cd ..
+# 2. Build and push the deployer image; prints the digest to pin
+AWS_PROFILE=<profile> backend/docker/content-deployer/build-and-push.sh
+#    Optional: make it available in more regions first
+AWS_PROFILE=<profile> backend/docker/content-deployer/replicate-image.sh us-west-2 eu-west-1
+
+# 3. Package the API Lambdas
+cd backend/src && zip -r /tmp/lambda-code.zip *.py templates/ && cd ../..
+aws s3 cp /tmp/lambda-code.zip s3://<deployment-bucket>/lambda-code-$(git rev-parse --short HEAD).zip
+
+# 4. Deploy the backend
 aws cloudformation deploy \
-  --template-file infrastructure/template.yaml \
+  --template-file backend/infrastructure/template.yaml \
   --stack-name prodify-backend \
-  --capabilities CAPABILITY_IAM \
-  --profile refaktr
+  --parameter-overrides \
+    DeploymentPackageBucket=<deployment-bucket> \
+    LambdaCodeKey=lambda-code-$(git rev-parse --short HEAD).zip \
+    DeployerImageDigest=<digest from step 2> \
+    DeployerImageRegions=us-east-1,us-west-2,eu-west-1 \
+    AlarmEmail=you@example.com \
+  --capabilities CAPABILITY_IAM
 ```
 
-### Deploy Frontend
-Upload `frontend/index.html` to S3 with static hosting enabled.
+The `ApiUrl` output is what a frontend calls (`POST /upload-request`, `GET /status/{requestId}`). Confirm the SNS subscription email to receive alarms. The staging bucket name is auto-generated unless you pass `StagingBucketName`.
+
+**Continuous deployment:** deploy `backend/infrastructure/github-oidc.yaml` once (`--capabilities CAPABILITY_NAMED_IAM`), set its `DeployRoleArn` output as the `AWS_DEPLOY_ROLE_ARN` repository variable, and pushes to `main` deploy via [deploy.yml](.github/workflows/deploy.yml). Optional variables: `AWS_REGION`, `DEPLOYMENT_BUCKET`, `STACK_NAME`, `STAGING_BUCKET_NAME`, `ALARM_EMAIL`, `DEPLOYER_IMAGE_REGIONS`.
+
+## Development
+
+```bash
+pip install -r requirements-dev.txt
+cfn-lint backend/infrastructure/*.yaml
+pytest                                   # unit tests + cfn-lint of a rendered site template
+AWS_PROFILE=<profile> tests/docker/run-local.sh   # builds the deployer image and runs Create/Update/Delete against a throwaway bucket
+```
+
+Layout:
+
+```
+backend/infrastructure/template.yaml   Prodify backend (API Gateway, 3 Lambdas, staging bucket, alarms)
+backend/infrastructure/github-oidc.yaml GitHub Actions deploy role
+backend/src/                           upload_request.py, status.py, generator.py + templates/site-template.yaml
+backend/docker/content-deployer/       the Lambda container image that runs in users' accounts
+tests/                                 pytest suite, synthetic fixtures, Docker end-to-end runner
+```
 
 ## Working with AI coding agents
 
@@ -69,7 +117,7 @@ This repo is set up for the [Agent Toolkit for AWS](https://github.com/aws/agent
 
 **One-time machine setup** (installs the AWS CLI, signs in via browser, configures the toolkit — no access keys needed). Paste this into your agent:
 
-```
+```text
 Set up Agent Toolkit for AWS by following instructions:
 https://raw.githubusercontent.com/aws/agent-toolkit-for-aws/refs/heads/main/setup-instructions/setup.md
 ```
@@ -80,19 +128,10 @@ https://raw.githubusercontent.com/aws/agent-toolkit-for-aws/refs/heads/main/setu
 - **Codex** — `codex plugin marketplace add aws/agent-toolkit-for-aws`, then `/plugins` → install `aws-core`.
 - **Cursor** — Settings → Plugins → Team Marketplaces → Import from Repo → `aws/agent-toolkit-for-aws`, then install `aws-core`.
 
-## Cost Analysis
+## Security
 
-| Service | Lovable | AWS (Prodify) |
-|---------|---------|---------------|
-| Hosting | $300/yr | ~$6/yr |
-
-**AWS Breakdown:**
-- API Gateway: Free tier (1M requests/month)
-- Lambda: Free tier (1M requests/month)  
-- S3: ~$0.023/GB/month
-- CloudFront: Pay per use
+See [SECURITY.md](SECURITY.md) for the disclosure process and a description of what is public by design.
 
 ## License
 
-© 2025 Prodify. All rights reserved.
-
+Apache-2.0 — see [LICENSE](LICENSE). © 2025 Refaktr LLC.

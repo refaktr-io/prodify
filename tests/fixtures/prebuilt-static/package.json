@@ -1,0 +1,7 @@
+{
+  "name": "prodify-fixture-prebuilt",
+  "private": true,
+  "scripts": {
+    "build": "echo 'should not run: dist/ already present' && exit 1"
+  }
+}

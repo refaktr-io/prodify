@@ -1,209 +1,314 @@
-import boto3
-import urllib.request
-import zipfile
+"""Custom::ContentDeployer handler. Runs in the site owner's account.
+
+Create/Update: download the project zip, build it if it isn't pre-built,
+sync the output into the site bucket, invalidate CloudFront on updates.
+Delete: empty the bucket so CloudFormation can remove it.
+
+Update is idempotent on SourceZipUrl. The URL of the last successful deploy
+is recorded in .prodify/state.json inside the bucket, so a rollback to the
+previous (long-expired) URL is a no-op instead of a second failure.
+"""
 import io
 import json
 import mimetypes
-import subprocess
 import os
 import shutil
+import subprocess
+import traceback
+import urllib.error
+import urllib.request
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
-def send_response(event, context, response_status, response_data, physical_resource_id=None, reason=None):
-    response_url = event['ResponseURL']
-    response_body = {
-        'Status': response_status,
-        'Reason': reason or f'See CloudWatch Log Stream: {context.log_stream_name}',
-        'PhysicalResourceId': physical_resource_id or context.log_stream_name,
+import boto3
+
+WORK_ROOT = '/tmp/project'
+STATE_KEY = '.prodify/state.json'
+SKIP_DIRS = {'node_modules', '__MACOSX', '.git'}
+BUILD_TIMEOUT_MARGIN_SECONDS = 90
+MAX_REASON_CHARS = 1500
+
+# Lambda's filesystem is read-only outside /tmp; package managers need writable
+# caches. NODE_ENV must NOT be "production" here: npm and bun would then skip
+# devDependencies, which is where vite and every other build tool lives.
+BUILD_ENV = {
+    **{k: v for k, v in os.environ.items() if k != 'NODE_ENV'},
+    'HOME': '/tmp',
+    'npm_config_cache': '/tmp/.npm',
+    'BUN_INSTALL_CACHE_DIR': '/tmp/.bun-cache',
+    'XDG_CACHE_HOME': '/tmp/.cache',
+    'CI': 'true',
+}
+
+CONTENT_TYPES = {
+    '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
+    '.css': 'text/css',
+    '.html': 'text/html',
+    '.json': 'application/json',
+    '.map': 'application/json',
+    '.webmanifest': 'application/manifest+json',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.wasm': 'application/wasm',
+    '.txt': 'text/plain',
+    '.xml': 'application/xml',
+}
+
+s3 = boto3.client('s3')
+
+
+# ---------------------------------------------------------------- CloudFormation plumbing
+
+def send_response(event, context, status, data=None, physical_id=None, reason=None):
+    body = json.dumps({
+        'Status': status,
+        'Reason': (reason or f"See CloudWatch log stream {context.log_stream_name}")[:MAX_REASON_CHARS],
+        'PhysicalResourceId': physical_id or context.log_stream_name,
         'StackId': event['StackId'],
         'RequestId': event['RequestId'],
         'LogicalResourceId': event['LogicalResourceId'],
         'NoEcho': False,
-        'Data': response_data
-    }
-    json_response_body = json.dumps(response_body)
-    headers = {
-        'content-type': '',
-        'content-length': str(len(json_response_body))
-    }
+        'Data': data or {},
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        event['ResponseURL'], data=body, method='PUT',
+        headers={'content-type': '', 'content-length': str(len(body))},
+    )
     try:
-        req = urllib.request.Request(response_url, data=json_response_body.encode('utf-8'), headers=headers, method='PUT')
-        with urllib.request.urlopen(req) as response:
-            print(f"Status code: {response.reason}")
+        with urllib.request.urlopen(req) as resp:
+            print(f"CloudFormation response: {resp.status}")
     except Exception as e:
         print(f"send_response failed: {e}")
 
-def handler(event, context):
+
+class DeployError(Exception):
+    """Failure with a message meant for the stack events, not just the logs."""
+
+
+# ---------------------------------------------------------------- Bucket helpers
+
+def list_keys(bucket):
+    paginator = s3.get_paginator('list_objects_v2')
+    for page in paginator.paginate(Bucket=bucket):
+        for obj in page.get('Contents', []):
+            yield obj['Key']
+
+
+def delete_keys(bucket, keys):
+    keys = list(keys)
+    for i in range(0, len(keys), 1000):
+        chunk = [{'Key': k} for k in keys[i:i + 1000]]
+        s3.delete_objects(Bucket=bucket, Delete={'Objects': chunk, 'Quiet': True})
+    return len(keys)
+
+
+def empty_bucket(bucket):
     try:
-        if event['RequestType'] == 'Delete':
-            send_response(event, context, 'SUCCESS', {})
+        deleted = delete_keys(bucket, list_keys(bucket))
+        print(f"Deleted {deleted} objects from {bucket}")
+    except s3.exceptions.NoSuchBucket:
+        print(f"Bucket {bucket} already gone")
+
+
+def read_state(bucket):
+    try:
+        return json.loads(s3.get_object(Bucket=bucket, Key=STATE_KEY)['Body'].read())
+    except Exception:
+        return {}
+
+
+def write_state(bucket, state):
+    s3.put_object(Bucket=bucket, Key=STATE_KEY, Body=json.dumps(state), ContentType='application/json')
+
+
+# ---------------------------------------------------------------- Project handling
+
+def download_and_extract(source_url):
+    if os.path.exists(WORK_ROOT):
+        shutil.rmtree(WORK_ROOT)
+    os.makedirs(WORK_ROOT)
+
+    print("Downloading project zip")
+    try:
+        with urllib.request.urlopen(source_url) as resp:
+            content = resp.read()
+    except urllib.error.HTTPError as e:
+        if e.code in (403, 400):
+            raise DeployError(
+                "The source download link has expired (links are valid for ~2 hours). "
+                "Upload the project to Prodify again and update the stack with the new template."
+            ) from e
+        raise DeployError(f"Could not download the project zip (HTTP {e.code})") from e
+
+    print(f"Extracting {len(content)} bytes")
+    with zipfile.ZipFile(io.BytesIO(content)) as z:
+        z.extractall(WORK_ROOT)
+
+    # GitHub exports wrap everything in a single top-level folder.
+    entries = [e for e in os.listdir(WORK_ROOT) if not e.startswith('.') and e != '__MACOSX']
+    if len(entries) == 1 and os.path.isdir(os.path.join(WORK_ROOT, entries[0])):
+        return os.path.join(WORK_ROOT, entries[0])
+    return WORK_ROOT
+
+
+def find_build_output(project_dir):
+    for name in ('dist', 'build'):
+        candidate = os.path.join(project_dir, name)
+        if os.path.isdir(candidate) and os.listdir(candidate):
+            return candidate
+    return None
+
+
+def run(cmd, cwd, timeout):
+    print(f"$ {' '.join(cmd)}")
+    result = subprocess.run(cmd, cwd=cwd, env=BUILD_ENV, capture_output=True, text=True, timeout=timeout)
+    if result.stdout:
+        print(result.stdout[-4000:])
+    if result.returncode != 0:
+        print(result.stderr[-4000:])
+        tail = (result.stderr or result.stdout).strip().splitlines()[-8:]
+        raise DeployError(f"`{' '.join(cmd)}` failed:\n" + '\n'.join(tail))
+    return result
+
+
+def build_project(project_dir, context):
+    has_bun_lock = any(os.path.exists(os.path.join(project_dir, f)) for f in ('bun.lockb', 'bun.lock'))
+    has_npm_lock = os.path.exists(os.path.join(project_dir, 'package-lock.json'))
+
+    def remaining():
+        return max(30, context.get_remaining_time_in_millis() // 1000 - BUILD_TIMEOUT_MARGIN_SECONDS)
+
+    try:
+        if has_bun_lock:
+            run(['bun', 'install'], project_dir, remaining())
+            run(['bun', 'run', 'build'], project_dir, remaining())
+        else:
+            # devDependencies hold the build tooling (vite etc.), so never --omit=dev.
+            run(['npm', 'ci'] if has_npm_lock else ['npm', 'install', '--no-audit', '--no-fund'], project_dir, remaining())
+            run(['npm', 'run', 'build'], project_dir, remaining())
+    except subprocess.TimeoutExpired as e:
+        raise DeployError(
+            "The build ran out of time. Build the project locally and upload a zip that includes the dist/ folder."
+        ) from e
+
+    output = find_build_output(project_dir)
+    if not output:
+        raise DeployError("The build finished but produced no dist/ or build/ folder.")
+    return output
+
+
+def content_type_for(filename):
+    ext = os.path.splitext(filename)[1].lower()
+    if ext in CONTENT_TYPES:
+        return CONTENT_TYPES[ext]
+    guessed, _ = mimetypes.guess_type(filename)
+    return guessed or 'application/octet-stream'
+
+
+def cache_control_for(key):
+    if key.endswith('.html') or key in ('manifest.json', 'site.webmanifest', 'robots.txt', 'sitemap.xml'):
+        return 'no-cache'
+    if key.startswith('assets/'):
+        # Vite content-hashes everything under assets/.
+        return 'public, max-age=31536000, immutable'
+    return 'public, max-age=3600'
+
+
+def collect_files(deploy_dir):
+    files = {}
+    for root, dirs, names in os.walk(deploy_dir):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in SKIP_DIRS]
+        for name in names:
+            if name.startswith('.'):
+                continue
+            path = os.path.join(root, name)
+            key = os.path.relpath(path, deploy_dir).replace(os.sep, '/')
+            files[key] = path
+    return files
+
+
+def sync_to_bucket(bucket, files):
+    def upload(item):
+        key, path = item
+        with open(path, 'rb') as f:
+            s3.put_object(
+                Bucket=bucket, Key=key, Body=f.read(),
+                ContentType=content_type_for(key), CacheControl=cache_control_for(key),
+            )
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        list(pool.map(upload, files.items()))
+    print(f"Uploaded {len(files)} files")
+
+    stale = [k for k in list_keys(bucket) if k not in files and not k.startswith('.prodify/')]
+    if stale:
+        print(f"Removed {delete_keys(bucket, stale)} stale files")
+
+
+def invalidate(distribution_id, request_id):
+    boto3.client('cloudfront').create_invalidation(
+        DistributionId=distribution_id,
+        InvalidationBatch={'Paths': {'Quantity': 1, 'Items': ['/*']}, 'CallerReference': request_id},
+    )
+    print(f"Invalidated distribution {distribution_id}")
+
+
+def deploy(props, context):
+    project_dir = download_and_extract(props['SourceZipUrl'])
+    deploy_dir = find_build_output(project_dir)
+    if deploy_dir:
+        print(f"Using pre-built output at {os.path.relpath(deploy_dir, WORK_ROOT)}")
+    elif os.path.exists(os.path.join(project_dir, 'package.json')):
+        print("No build output in the zip; building")
+        deploy_dir = build_project(project_dir, context)
+    else:
+        print("No package.json; deploying the zip contents as-is")
+        deploy_dir = project_dir
+
+    files = collect_files(deploy_dir)
+    if 'index.html' not in files:
+        raise DeployError("No index.html found at the top level of the deployable output.")
+    sync_to_bucket(props['BucketName'], files)
+    return len(files)
+
+
+# ---------------------------------------------------------------- Entry point
+
+def handler(event, context):
+    props = event.get('ResourceProperties', {})
+    bucket = props.get('BucketName', '')
+    physical_id = f"prodify-content-{bucket}"
+    request_type = event['RequestType']
+
+    try:
+        if request_type == 'Delete':
+            if bucket:
+                empty_bucket(bucket)
+            send_response(event, context, 'SUCCESS', physical_id=physical_id)
             return
-        
-        source_url = event['ResourceProperties']['SourceZipUrl']
-        bucket = event['ResourceProperties']['BucketName']
-        
-        # Create working directory
-        work_dir = '/tmp/project'
-        if os.path.exists(work_dir):
-            shutil.rmtree(work_dir)
-        os.makedirs(work_dir)
-        
-        print(f"Downloading from {source_url}")
-        with urllib.request.urlopen(source_url) as response:
-            zip_content = response.read()
-        
-        print("Extracting project...")
-        with zipfile.ZipFile(io.BytesIO(zip_content)) as z:
-            z.extractall(work_dir)
-        
-        # Detect if there's a root folder
-        items = os.listdir(work_dir)
-        items = [i for i in items if not i.startswith('.') and i != '__MACOSX']
-        if len(items) == 1 and os.path.isdir(os.path.join(work_dir, items[0])):
-            work_dir = os.path.join(work_dir, items[0])
-        
-        # Check if this is a Node.js project
-        package_json_path = os.path.join(work_dir, 'package.json')
-        needs_build = os.path.exists(package_json_path)
-        
-        deploy_dir = work_dir
-        
-        if needs_build:
-            print("Detected Node.js project, checking for pre-built assets...")
-            
-            # Check if dist or build already exists
-            dist_dir = os.path.join(work_dir, 'dist')
-            build_dir = os.path.join(work_dir, 'build')
-            
-            if os.path.exists(dist_dir) and os.listdir(dist_dir):
-                print("Found existing dist/ folder, using it")
-                deploy_dir = dist_dir
-            elif os.path.exists(build_dir) and os.listdir(build_dir):
-                print("Found existing build/ folder, using it")
-                deploy_dir = build_dir
-            else:
-                print("No pre-built assets found, building project...")
-                
-                # Check for package manager
-                has_bun = os.path.exists(os.path.join(work_dir, 'bun.lockb'))
-                
-                try:
-                    if has_bun:
-                        print("Installing dependencies with Bun...")
-                        result = subprocess.run(
-                            ['bun', 'install'],
-                            cwd=work_dir,
-                            capture_output=True,
-                            text=True,
-                            timeout=600
-                        )
-                        print(result.stdout)
-                        if result.returncode != 0:
-                            print(f"bun install stderr: {result.stderr}")
-                        
-                        print("Building project with Bun...")
-                        result = subprocess.run(
-                            ['bun', 'run', 'build'],
-                            cwd=work_dir,
-                            capture_output=True,
-                            text=True,
-                            timeout=600
-                        )
-                        print(result.stdout)
-                        if result.returncode != 0:
-                            print(f"bun build stderr: {result.stderr}")
-                            send_response(event, context, 'FAILED', {}, 
-                                        reason=f"Build failed: {result.stderr}")
-                            return
-                    else:
-                        print("Installing dependencies...")
-                        result = subprocess.run(
-                            ['npm', 'ci', '--omit=dev'],
-                            cwd=work_dir,
-                            capture_output=True,
-                            text=True,
-                            timeout=600
-                        )
-                        print(result.stdout)
-                        if result.returncode != 0:
-                            print(f"npm install stderr: {result.stderr}")
-                        
-                        print("Building project...")
-                        result = subprocess.run(
-                            ['npm', 'run', 'build'],
-                        cwd=work_dir,
-                        capture_output=True,
-                        text=True,
-                        timeout=600
-                    )
-                    print(result.stdout)
-                    if result.returncode != 0:
-                        print(f"npm build stderr: {result.stderr}")
-                        raise Exception(f"Build failed: {result.stderr}")
-                    
-                    # Look for dist or build folder
-                    if os.path.exists(dist_dir) and os.listdir(dist_dir):
-                        deploy_dir = dist_dir
-                        print("Using dist/ folder")
-                    elif os.path.exists(build_dir) and os.listdir(build_dir):
-                        deploy_dir = build_dir
-                        print("Using build/ folder")
-                    else:
-                        raise Exception("No dist/ or build/ folder found after build")
-                        
-                except subprocess.TimeoutExpired:
-                    send_response(event, context, 'FAILED', {},
-                                reason="Build timed out (10 min limit). Please build locally and upload dist/ folder.")
-                    return
-                except Exception as e:
-                    send_response(event, context, 'FAILED', {},
-                                reason=f"Build failed: {str(e)}. Please build locally and upload dist/ folder.")
-                    return
-        
-        print(f"Uploading from {deploy_dir}...")
-        s3 = boto3.client('s3')
-        
-        uploaded_count = 0
-        for root, dirs, files in os.walk(deploy_dir):
-            # Remove hidden directories and node_modules from traversal
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d != '__MACOSX' and d != 'node_modules']
-            
-            for filename in files:
-                # Skip hidden files and macOS metadata
-                if filename.startswith('.') or filename == '.DS_Store':
-                    continue
-                
-                filepath = os.path.join(root, filename)
-                relative_path = os.path.relpath(filepath, deploy_dir)
-                
-                # Skip if in hidden directory
-                if any(part.startswith('.') or part == '__MACOSX' for part in relative_path.split(os.sep)):
-                    continue
-                
-                content_type, _ = mimetypes.guess_type(filename)
-                if not content_type:
-                    content_type = 'application/octet-stream'
-                
-                with open(filepath, 'rb') as f:
-                    s3.put_object(
-                        Bucket=bucket,
-                        Key=relative_path.replace('\\', '/'),
-                        Body=f.read(),
-                        ContentType=content_type
-                    )
-                uploaded_count += 1
-                
-                if uploaded_count % 10 == 0:
-                    print(f"Uploaded {uploaded_count} files...")
-        
-        print(f"Successfully uploaded {uploaded_count} files")
-        
-        # Cleanup
-        shutil.rmtree('/tmp/project', ignore_errors=True)
-        
-        send_response(event, context, 'SUCCESS', {})
-        
+
+        if request_type == 'Update':
+            state = read_state(bucket)
+            if state.get('sourceZipUrl') == props.get('SourceZipUrl'):
+                print("SourceZipUrl unchanged since last successful deploy; nothing to do")
+                send_response(event, context, 'SUCCESS', {'UploadedFiles': state.get('uploadedFiles', 0)}, physical_id)
+                return
+
+        uploaded = deploy(props, context)
+        write_state(bucket, {'sourceZipUrl': props['SourceZipUrl'], 'uploadedFiles': uploaded})
+
+        if request_type == 'Update' and props.get('DistributionId'):
+            invalidate(props['DistributionId'], event['RequestId'])
+
+        shutil.rmtree(WORK_ROOT, ignore_errors=True)
+        send_response(event, context, 'SUCCESS', {'UploadedFiles': uploaded}, physical_id)
+
+    except DeployError as e:
+        print(f"Deploy failed: {e}")
+        send_response(event, context, 'FAILED', physical_id=physical_id, reason=str(e))
     except Exception as e:
-        print(f"Error: {e}")
-        import traceback
         traceback.print_exc()
-        send_response(event, context, 'FAILED', {}, reason=str(e))
+        send_response(event, context, 'FAILED', physical_id=physical_id, reason=f"{type(e).__name__}: {e}")

@@ -1,23 +1,62 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Prodify Backend - Pure CloudFormation
+Description: Prodify backend - intake API that turns an uploaded project zip into a deployable CloudFormation template
 
 Parameters:
   DeploymentPackageBucket:
     Type: String
     Default: prodify-backend
-    Description: S3 bucket where Lambda deployment packages are stored
+    Description: Existing S3 bucket where Lambda deployment packages are uploaded (create it before the first deploy)
 
   LambdaCodeKey:
     Type: String
     Default: lambda-code.zip
     Description: S3 key of the Lambda deployment package (unique per deploy so CloudFormation picks up code changes)
 
+  StagingBucketName:
+    Type: String
+    Default: ''
+    Description: Name for the staging bucket. Leave empty to auto-generate a unique name (recommended for new deployments).
+
+  DeployerImageRepository:
+    Type: String
+    Default: prodify-content-deployer
+    Description: ECR repository name (in this account) holding the content-deployer image, replicated to every region in DeployerImageRegions
+
+  DeployerImageDigest:
+    Type: String
+    Default: sha256:654a4b4b1e6a5d12c60534d30600a52b407ed046ba0a4f757d5e67ff8246d17a
+    AllowedPattern: '^sha256:[0-9a-f]{64}$'
+    Description: Digest of the content-deployer image pinned into generated templates (printed by build-and-push.sh)
+
+  DeployerImageRegions:
+    Type: CommaDelimitedList
+    Default: us-east-1
+    Description: Regions the deployer image is available in (see replicate-image.sh). Generated stacks can only be created in these regions.
+
+  MaxUploadBytes:
+    Type: Number
+    Default: 52428800
+    MinValue: 1048576
+    Description: Uploads larger than this are rejected by the generator (default 50 MiB)
+
+  AlarmEmail:
+    Type: String
+    Default: ''
+    Description: Optional email address subscribed to the alarm topic (confirm the subscription email after deploy)
+
+Conditions:
+  HasStagingBucketName: !Not [!Equals [!Ref StagingBucketName, '']]
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+
 Resources:
-  # S3 Staging Bucket
+  # ---------------------------------------------------------------- Storage
   StagingBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: prodify-staging
+      BucketName: !If
+        - HasStagingBucketName
+        - !Ref StagingBucketName
+        - !Sub "prodify-staging-${AWS::AccountId}-${AWS::Region}"
       # ACLs stay blocked; policy-based public access is allowed so the
       # generated/* prefix can be read anonymously (quick-create template URLs
       # must be short-lived-token-free or the console sign-in redirect breaks).
@@ -26,6 +65,10 @@ Resources:
         IgnorePublicAcls: true
         BlockPublicPolicy: false
         RestrictPublicBuckets: false
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
       CorsConfiguration:
         CorsRules:
           - AllowedHeaders: ['*']
@@ -37,6 +80,8 @@ Resources:
           - Id: DeleteAfter24Hours
             Status: Enabled
             ExpirationInDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
 
   # Anonymous read of generated templates only. Keys contain an unguessable
   # UUID and objects expire via the lifecycle rule above; uploads/* stays private.
@@ -53,7 +98,7 @@ Resources:
             Action: s3:GetObject
             Resource: !Sub "${StagingBucket.Arn}/generated/*"
 
-  # Lambda Execution Role
+  # ------------------------------------------------------------------- IAM
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -65,9 +110,9 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
-        - PolicyName: S3Access
+        - PolicyName: StagingBucketAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -75,13 +120,13 @@ Resources:
                 Action:
                   - s3:PutObject
                   - s3:GetObject
-                  - s3:ListBucket
                   - s3:DeleteObject
-                Resource:
-                  - !GetAtt StagingBucket.Arn
-                  - !Sub "${StagingBucket.Arn}/*"
+                Resource: !Sub "${StagingBucket.Arn}/*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt StagingBucket.Arn
 
-  # Upload Request Lambda
+  # --------------------------------------------------------------- Lambdas
   UploadRequestFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -95,6 +140,7 @@ Resources:
       Environment:
         Variables:
           STAGING_BUCKET: !Ref StagingBucket
+          MAX_UPLOAD_BYTES: !Ref MaxUploadBytes
       Timeout: 30
 
   UploadRequestPermission:
@@ -105,7 +151,6 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ProdifyApi}/*"
 
-  # Status Lambda
   StatusFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -129,7 +174,6 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ProdifyApi}/*"
 
-  # Generator Lambda
   GeneratorFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -143,6 +187,10 @@ Resources:
       Environment:
         Variables:
           STAGING_BUCKET: !Ref StagingBucket
+          MAX_UPLOAD_BYTES: !Ref MaxUploadBytes
+          DEPLOYER_IMAGE_REPOSITORY: !Ref DeployerImageRepository
+          DEPLOYER_IMAGE_DIGEST: !Ref DeployerImageDigest
+          DEPLOYER_IMAGE_REGIONS: !Join [',', !Ref DeployerImageRegions]
       Timeout: 60
 
   GeneratorPermission:
@@ -154,7 +202,8 @@ Resources:
       SourceAccount: !Ref AWS::AccountId
       SourceArn: !GetAtt StagingBucket.Arn
 
-  # S3 Event Configuration (Custom Resource)
+  # A bucket can't declare a notification to a function that also depends on
+  # the bucket (circular), so a custom resource installs it after both exist.
   S3NotificationLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -166,7 +215,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
         - PolicyName: S3NotificationConfig
           PolicyDocument:
@@ -187,22 +236,21 @@ Resources:
       Timeout: 30
       Code:
         ZipFile: |
-          import json
           import boto3
           import cfnresponse
-          
+
           s3 = boto3.client('s3')
-          
+
           def handler(event, context):
               try:
                   bucket = event['ResourceProperties']['Bucket']
                   function_arn = event['ResourceProperties']['FunctionArn']
-                  
+
                   if event['RequestType'] == 'Delete':
                       s3.put_bucket_notification_configuration(Bucket=bucket, NotificationConfiguration={})
                       cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
                       return
-                  
+
                   config = {
                       'LambdaFunctionConfigurations': [{
                           'LambdaFunctionArn': function_arn,
@@ -217,7 +265,7 @@ Resources:
                           }
                       }]
                   }
-                  
+
                   s3.put_bucket_notification_configuration(Bucket=bucket, NotificationConfiguration=config)
                   cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
               except Exception as e:
@@ -232,41 +280,13 @@ Resources:
       Bucket: !Ref StagingBucket
       FunctionArn: !GetAtt GeneratorFunction.Arn
 
-  # API Gateway
+  # ------------------------------------------------------------ API Gateway
   ProdifyApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
       Name: prodify-api
-      Description: Prodify Backend API
+      Description: Prodify intake API
 
-  # CORS Configuration
-  ApiGatewayOptionsMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref ProdifyApi
-      ResourceId: !GetAtt ProdifyApi.RootResourceId
-      HttpMethod: OPTIONS
-      AuthorizationType: NONE
-      Integration:
-        Type: MOCK
-        RequestTemplates:
-          application/json: '{"statusCode": 200}'
-        IntegrationResponses:
-          - StatusCode: '200'
-            ResponseParameters:
-              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
-              method.response.header.Access-Control-Allow-Origin: "'*'"
-            ResponseTemplates:
-              application/json: ''
-      MethodResponses:
-        - StatusCode: '200'
-          ResponseParameters:
-            method.response.header.Access-Control-Allow-Headers: true
-            method.response.header.Access-Control-Allow-Methods: true
-            method.response.header.Access-Control-Allow-Origin: true
-
-  # /upload-request resource
   UploadRequestResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -316,7 +336,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Origin: true
 
-  # /status resource
   StatusResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -373,7 +392,9 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Origin: true
 
-  # API Deployment
+  # Rename this logical ID (e.g. ApiDeployment2) whenever methods/resources
+  # change: a Deployment is immutable and the stage only serves the one it
+  # points at.
   ApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -390,14 +411,77 @@ Resources:
       RestApiId: !Ref ProdifyApi
       DeploymentId: !Ref ApiDeployment
       StageName: Prod
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          ThrottlingRateLimit: 10
+          ThrottlingBurstLimit: 20
+
+  # ------------------------------------------------------------- Alarms
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-alarms"
+
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  GeneratorErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-generator-errors"
+      AlarmDescription: The generator Lambda failed; uploads are not producing templates
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref GeneratorFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  ApiErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-api-5xx"
+      AlarmDescription: The intake API is returning 5XX responses
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: ApiName
+          Value: prodify-api
+        - Name: Stage
+          Value: !Ref ApiStage
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
 
 Outputs:
   ApiUrl:
     Description: API Gateway endpoint URL
-    Value: !Sub "https://${ProdifyApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+    Value: !Sub "https://${ProdifyApi}.execute-api.${AWS::Region}.amazonaws.com/${ApiStage}"
     Export:
       Name: ProdifyApiUrl
-  
+
   StagingBucketName:
     Description: S3 staging bucket name
     Value: !Ref StagingBucket
+
+  AlarmTopicArn:
+    Description: SNS topic that receives alarm notifications
+    Value: !Ref AlarmTopic

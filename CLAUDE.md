@@ -4,63 +4,69 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Prodify converts a Lovable.dev project export (a .zip) into a CloudFormation template that hosts the built site on S3 + CloudFront in the *user's* AWS account. This repo is the backend API and the generated-template machinery. The public website at https://refaktr.io/prodify/ is maintained in a **separate repo**; `frontend/index.html` here is the original landing page and is no longer deployed by CI.
-
-There is no test suite, linter, or build step for the Python code. Verification is done by validating the template and running the smoke test below.
+Prodify converts a Lovable.dev project export (a .zip) into a CloudFormation template that hosts the built site on S3 + CloudFront in the *user's* AWS account. This repo is the intake API, the generated-template source, and the container image that does the deploying. The public website at https://refaktr.io/prodify/ is maintained in a **separate repo** and only calls the API.
 
 ## Commands
 
-All AWS work uses the `refaktr` CLI profile in `us-east-1`. Bucket names (`prodify-backend`, `prodify-staging`) and the stack name (`prodify-backend`) are hardcoded.
-
 ```bash
-# Validate the backend template
-aws cloudformation validate-template --template-body file://backend/infrastructure/template.yaml --profile refaktr --region us-east-1
-
-# Package + deploy the backend manually (CI does the same on push to main touching backend/**)
-cd backend/src && zip -r /tmp/lambda-code.zip *.py
-KEY=lambda-code-$(git rev-parse --short HEAD).zip
-aws s3 cp /tmp/lambda-code.zip s3://prodify-backend/$KEY --profile refaktr
-cd .. && aws cloudformation deploy --template-file infrastructure/template.yaml \
-  --stack-name prodify-backend --parameter-overrides LambdaCodeKey=$KEY \
-  --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset --profile refaktr --region us-east-1
-
-# Build + push the content-deployer container image (arm64) to ECR
-backend/docker/content-deployer/build-and-push.sh
-
-# Smoke test the deployed API end to end
-API=https://0m1no5obe7.execute-api.us-east-1.amazonaws.com/Prod
-RESP=$(curl -s -X POST $API/upload-request)
-URL=$(echo "$RESP" | python3 -c 'import sys,json;print(json.load(sys.stdin)["uploadUrl"])')
-RID=$(echo "$RESP" | python3 -c 'import sys,json;print(json.load(sys.stdin)["requestId"])')
-curl -s -X PUT -H 'Content-Type: application/zip' --data-binary @some-project.zip "$URL"
-sleep 5; curl -s $API/status/$RID      # expect {"status":"READY","templateUrl":...}
+pip install -r requirements-dev.txt          # or: uv venv .venv && uv pip install -p .venv/bin/python -r requirements-dev.txt
+pytest                                       # unit tests; includes cfn-lint of a rendered site template
+pytest tests/test_deployer.py -k rollback    # single test
+cfn-lint backend/infrastructure/*.yaml
+AWS_PROFILE=<profile> tests/docker/run-local.sh [fixture...]   # real build path: image + Create/Update/Delete against a throwaway bucket
 ```
 
-**The `LambdaCodeKey` must be unique per deploy.** CloudFormation only updates function code when the `Code` property changes; re-uploading to the same key silently deploys nothing. CI keys the zip by `GITHUB_SHA`. The checked-in `backend/lambda-code.zip` is a stale artifact, not what CI deploys.
+Deploying the maintainer instance (stack `prodify-backend`, account profile `refaktr`, `us-east-1`; forks substitute their own):
+
+```bash
+cd backend/src && zip -r /tmp/lambda-code.zip *.py templates/ && cd ../..
+KEY=lambda-code-$(git rev-parse --short HEAD).zip
+aws s3 cp /tmp/lambda-code.zip s3://prodify-backend/$KEY --profile refaktr
+aws cloudformation deploy --template-file backend/infrastructure/template.yaml \
+  --stack-name prodify-backend \
+  --parameter-overrides LambdaCodeKey=$KEY StagingBucketName=prodify-staging AlarmEmail=prodify@refaktr.io \
+  --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset --profile refaktr --region us-east-1
+
+AWS_PROFILE=refaktr backend/docker/content-deployer/build-and-push.sh      # new deployer image; prints digest
+AWS_PROFILE=refaktr backend/docker/content-deployer/replicate-image.sh <regions...>   # run BEFORE pushing when adding regions
+```
+
+Rules that bite:
+
+- **`LambdaCodeKey` must be unique per deploy** — CloudFormation only updates function code when the `Code` property changes. CI keys it by `GITHUB_SHA`.
+- **`StagingBucketName` must be passed as `prodify-staging` for the maintainer stack** (CI does this via a repository variable). Leaving it empty auto-generates a name, which would replace the live bucket.
+- The Lambda zip must include `templates/`; `generator.py` reads `templates/site-template.yaml` at runtime.
+- A new deployer image means a new digest: update the `DeployerImageDigest` default in `template.yaml` (that's the committed source of truth) and deploy.
 
 ## Architecture
 
-Two AWS accounts are involved, and it matters which code runs where:
+Two AWS accounts are involved, and which code runs where is the central design decision:
 
-**Prodify's account** (`backend/infrastructure/template.yaml`, `backend/src/`) — a REST API (API Gateway → three Python 3.13 Lambdas) plus the `prodify-staging` S3 bucket. Everything keys off the S3 object layout, which is the contract between the functions:
+**Prodify's account** — `backend/infrastructure/template.yaml`, `backend/src/`. API Gateway → three Python 3.13 Lambdas + the staging bucket + alarms. The functions communicate only through the S3 key layout:
 
-- `upload_request.py` mints a `requestId` (uuid4) and a presigned PUT for `uploads/{requestId}/source.zip` (5 min).
-- An S3 event notification (installed by the `S3NotificationFunction` custom resource, because CloudFormation can't declare notifications on a bucket it's also creating without a cycle) fires `generator.py` on `uploads/*.zip`.
-- `generator.py` writes `generated/{requestId}/template.yaml`. The template is a Python f-string, so CloudFormation `${...}` substitutions inside it are written as `${{...}}`.
-- `status.py` polls for that key and returns a **plain regional S3 URL** (`https://prodify-staging.s3.us-east-1.amazonaws.com/generated/...`). The `generated/*` prefix is anonymously readable via bucket policy — the key is unguessable and the lifecycle rule expires everything after 1 day. Do not switch this back to a presigned URL: the ~1 KB session token makes the console quick-create link overflow the AWS sign-in redirect and the link dies with the Lambda's role credentials. `uploads/*` stays private.
+- `upload_request.py` mints a `requestId` (uuid4) and a presigned PUT for `uploads/{requestId}/source.zip` (5 min). Returns `maxUploadBytes` so clients can pre-check.
+- An S3 notification (installed by the `S3NotificationFunction` custom resource, because a bucket can't declare a notification to a function that depends on the bucket) fires `generator.py` on `uploads/*.zip`.
+- `generator.py` rejects oversized uploads by writing `generated/{requestId}/error.json`; otherwise renders `templates/site-template.yaml` (plain `__PLACEHOLDER__` substitution — no f-string brace escaping) into `generated/{requestId}/template.yaml`. It derives Prodify's account ID from `context.invoked_function_arn` and builds a per-region image `Mappings` block from `DEPLOYER_IMAGE_*` env vars.
+- `status.py` reports `READY` (template exists), `ERROR` (error.json exists, with message), or `PENDING`. The template URL is a **plain regional S3 URL**; the `generated/*` prefix is anonymously readable via bucket policy (unguessable key, 1-day lifecycle). Do not switch this back to a presigned URL: the ~1 KB session token overflows the AWS console sign-in redirect that quick-create links pass through, and the link would die with the Lambda's role credentials. `uploads/*` stays private.
 
-**The user's account** (the generated template + `backend/docker/content-deployer/`) — the template creates a private S3 bucket, a CloudFront distribution with Origin Access Control and SPA error routing, and a `Custom::ContentDeployer` resource backed by a **container-image Lambda** pulled from Prodify's ECR repo (`prodify-content-deployer`, pinned by digest in `generator.py`). `app.py` downloads the source zip via a presigned GET baked into the template (2 h), runs `bun install && bun run build` (or npm if no `bun.lockb`), and uploads `dist/` or `build/` to the site bucket. The container exists only because building a Vite project needs Node/Bun, which the managed Lambda runtimes don't provide; running the build in the user's account is deliberate so Prodify never executes untrusted `npm` scripts in its own infrastructure.
+**The user's account** — the rendered `site-template.yaml` plus `backend/docker/content-deployer/`. The stack creates a private bucket, a CloudFront distribution (OAC, security headers, SPA error routing, optional `DomainName`/`AcmCertificateArn`), and a `Custom::ContentDeployer` resource backed by a container-image Lambda pulled from Prodify's ECR (`!FindInMap` on `AWS::Region`; a `Rules` assertion rejects unsupported regions up front). `app.py`:
 
-Consequences of this split worth knowing before changing things:
+- Create: download the presigned `SourceZipUrl` (~2 h), use `dist/`/`build/` if present, else `bun install && bun run build` (npm if no bun lockfile; never `--omit=dev` — build tools are devDependencies; caches redirected to `/tmp` because the filesystem is read-only), then sync to the bucket with `Cache-Control` (`no-cache` HTML, `immutable` `assets/*`) and delete stale keys.
+- Update: no-op if `SourceZipUrl` equals the last successfully deployed URL recorded in `.prodify/state.json` in the site bucket — this is what makes CloudFormation rollbacks safe when the old URL has expired. Otherwise redeploy and invalidate `/*`.
+- Delete: empty the bucket so the stack can delete it.
+- Stable `PhysicalResourceId` (`prodify-content-<bucket>`), so updates don't trigger delete-old-resource churn.
 
-- A new deployer image requires bumping the `sha256` digest hardcoded in `generator.py`; `build-and-push.sh` pushes `:latest` but the template pins by digest.
-- The ECR repository policy must allow **cross-account** pulls (`lambda.amazonaws.com` with `aws:sourceArn` matching any account's functions, plus caller pull permissions) or the user's stack fails at `ContentDeployer`. As of the last check the policy only allowed Prodify's own account — test generated templates from a second AWS account, not just this one.
-- The presigned `SourceZipUrl` inside the generated template expires in ≤2 h, and the custom resource re-runs on every stack Update with that same URL. The Delete handler does not empty the site bucket, so generated stacks currently fail to delete while it has objects.
-- Everything assumes `us-east-1` (ECR image region, quick-create link region, bucket names).
+The container exists only because building a Vite project needs Node/Bun. Running the build in the user's account is deliberate: Prodify never executes untrusted `npm` scripts in its own infrastructure. Consequences:
+
+- The ECR repository policy (`ecr-repository-policy.json`) must allow pulls by any account and by `lambda.amazonaws.com` for any function ARN; `build-and-push.sh`/`replicate-image.sh` apply it. Test generated templates from an account that isn't the maintainer's.
+- The image is pinned by digest in every generated template, so old templates keep working after a new push; the lifecycle rule only expires untagged images.
+- Every region in `DeployerImageRegions` needs the image replicated there (`replicate-image.sh`, which must run before the push it should replicate).
 
 ## Deployment pipeline
 
-`.github/workflows/deploy.yml` runs on push to `main` when `backend/**` changes: zip `backend/src/*.py` → upload to `s3://prodify-backend/lambda-code-<sha>.zip` → `cloudformation deploy` with `LambdaCodeKey` overridden. It uses long-lived `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` repository secrets. It does **not** deploy the website; that happens from the website repo.
+`.github/workflows/deploy.yml` runs on push to `main` (backend template, `backend/src/**`, or the workflow): zip → `s3://$DEPLOYMENT_BUCKET/lambda-code-<sha>.zip` → `cloudformation deploy` with parameters from repository variables (`AWS_DEPLOY_ROLE_ARN`, `STAGING_BUCKET_NAME`, `ALARM_EMAIL`, `DEPLOYER_IMAGE_REGIONS`, ...). Auth is a GitHub OIDC role from `backend/infrastructure/github-oidc.yaml` (deployed once, manually). `validate.yml` runs cfn-lint and pytest on pull requests. Neither workflow deploys the website.
+
+The API Gateway `Deployment` resource is immutable: rename its logical ID when adding or changing methods, or the `Prod` stage keeps serving the old deployment.
 
 ## AWS Agent Toolkit
 

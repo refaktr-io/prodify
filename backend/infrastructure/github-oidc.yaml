@@ -46,7 +46,7 @@ Resources:
               Federated: !If
                 - ShouldCreateProvider
                 - !Ref GitHubOidcProvider
-                - !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+                - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:
@@ -62,7 +62,7 @@ Resources:
                 Action:
                   - s3:PutObject
                   - s3:GetObject
-                Resource: !Sub "arn:aws:s3:::${DeploymentPackageBucket}/*"
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${DeploymentPackageBucket}/*"
               - Sid: ManageBackendStack
                 Effect: Allow
                 Action:
@@ -76,8 +76,8 @@ Resources:
                   - cloudformation:GetTemplateSummary
                   - cloudformation:ValidateTemplate
                 Resource:
-                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${BackendStackName}/*"
-                  - !Sub "arn:aws:cloudformation:${AWS::Region}:aws:transform/*"
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${BackendStackName}/*"
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/*"
               # CloudFormation creates the stack's resources with the caller's
               # permissions, so the role needs rights over everything the
               # backend template declares.
@@ -125,7 +125,7 @@ Resources:
                   - iam:TagRole
                   - iam:UntagRole
                   - iam:PassRole
-                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${BackendStackName}-*"
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${BackendStackName}-*"
 
 Outputs:
   DeployRoleArn:

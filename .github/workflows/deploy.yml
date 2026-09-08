@@ -18,6 +18,12 @@ permissions:
   id-token: write
   contents: read
 
+# Two pushes in quick succession (e.g. merging several PRs) would otherwise
+# race on CloudFormation change sets and one run fails with OBSOLETE.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   DEPLOYMENT_BUCKET: ${{ vars.DEPLOYMENT_BUCKET || 'prodify-backend' }}

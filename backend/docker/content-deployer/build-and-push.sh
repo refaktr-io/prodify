@@ -36,5 +36,6 @@ echo
 echo "Pushed ${ECR_URI}:${IMAGE_TAG}"
 echo "Digest: ${DIGEST}"
 echo
-echo "Deploy the backend with:"
-echo "  --parameter-overrides DeployerImageUri=${ECR_URI}@${DIGEST}"
+echo "Pin it: set the DeployerImageDigest default in backend/infrastructure/template.yaml to"
+echo "  ${DIGEST}"
+echo "then deploy (or pass --parameter-overrides DeployerImageDigest=${DIGEST})."

@@ -37,6 +37,7 @@ Rules that bite:
 - **`StagingBucketName` must be passed as `prodify-staging` for the maintainer stack** (CI does this via a repository variable). Leaving it empty auto-generates a name, which would replace the live bucket.
 - The Lambda zip must include `templates/`; `generator.py` reads `templates/site-template.yaml` at runtime.
 - A new deployer image means a new digest: update the `DeployerImageDigest` default in `template.yaml` (that's the committed source of truth) and deploy.
+- **`cloudformation deploy` keeps an existing stack's previous value for every parameter you don't pass.** Changing a template default does nothing to the live stack; CI therefore passes every parameter explicitly (it greps the digest out of the template). When deploying by hand, pass `DeployerImageDigest` too.
 
 ## Architecture
 

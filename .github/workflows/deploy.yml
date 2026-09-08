@@ -48,9 +48,14 @@ jobs:
           zip -r ../lambda-code.zip *.py templates/
           aws s3 cp ../lambda-code.zip "s3://${DEPLOYMENT_BUCKET}/lambda-code-${GITHUB_SHA}.zip"
 
+      # `cloudformation deploy` keeps an existing stack's previous value for any
+      # parameter not passed here, so template defaults alone never change a
+      # live stack. The digest is read from the template to keep one source of truth.
       - name: Deploy CloudFormation Stack
         run: |
           cd backend
+          DIGEST=$(grep -A4 '^  DeployerImageDigest:' infrastructure/template.yaml | grep 'Default:' | awk '{print $2}')
+          echo "Deployer image digest: $DIGEST"
           aws cloudformation deploy \
             --template-file infrastructure/template.yaml \
             --stack-name "$STACK_NAME" \
@@ -60,6 +65,7 @@ jobs:
               "StagingBucketName=${STAGING_BUCKET_NAME}" \
               "AlarmEmail=${ALARM_EMAIL}" \
               "DeployerImageRegions=${DEPLOYER_IMAGE_REGIONS}" \
+              "DeployerImageDigest=${DIGEST}" \
             --capabilities CAPABILITY_IAM \
             --no-fail-on-empty-changeset
 

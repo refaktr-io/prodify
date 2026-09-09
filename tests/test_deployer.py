@@ -156,3 +156,53 @@ def test_collect_files_skips_hidden_and_node_modules(tmp_path):
     (tmp_path / 'node_modules').mkdir()
     (tmp_path / 'node_modules' / 'pkg.js').write_text('x')
     assert set(app.collect_files(str(tmp_path))) == {'index.html', 'assets/a.js'}
+
+
+LOVABLE_CONFIG = '''import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+
+export default defineConfig({
+  tanstackStart: {
+    server: { entry: "server" },
+  },
+});
+'''
+
+
+def test_inject_prerender_into_lovable_wrapper_config():
+    out = app.inject_prerender(LOVABLE_CONFIG)
+    assert out.count('prerender:') == 1
+    assert 'tanstackStart: {\n    prerender: { enabled: true' in out
+    assert 'server: { entry: "server" }' in out
+
+
+def test_inject_prerender_is_idempotent():
+    once = app.inject_prerender(LOVABLE_CONFIG)
+    assert app.inject_prerender(once) == once
+
+
+def test_inject_prerender_into_lovable_wrapper_without_tanstack_block():
+    src = 'import { defineConfig } from "@lovable.dev/vite-tanstack-config";\nexport default defineConfig({});\n'
+    out = app.inject_prerender(src)
+    assert 'tanstackStart: { prerender: { enabled: true' in out
+
+
+def test_inject_prerender_into_plain_plugin_call():
+    src = 'import { tanstackStart } from "@tanstack/react-start/plugin/vite";\nexport default { plugins: [tanstackStart({ srcDirectory: "src" })] };\n'
+    assert 'tanstackStart({ prerender: { enabled: true' in app.inject_prerender(src)
+    src_empty = 'export default { plugins: [tanstackStart()] };'
+    assert 'tanstackStart({ prerender: { enabled: true, crawlLinks: true, autoStaticPathsDiscovery: true } })' in app.inject_prerender(src_empty)
+
+
+def test_inject_prerender_returns_none_for_unrecognized_config():
+    assert app.inject_prerender('export default { plugins: [] };') is None
+
+
+def test_ensure_prerender_patches_only_tanstack_projects(tmp_path):
+    (tmp_path / 'vite.config.ts').write_text(LOVABLE_CONFIG)
+    (tmp_path / 'package.json').write_text(json.dumps({'dependencies': {'react': '19'}}))
+    assert app.ensure_prerender(str(tmp_path)) is False
+    assert (tmp_path / 'vite.config.ts').read_text() == LOVABLE_CONFIG
+
+    (tmp_path / 'package.json').write_text(json.dumps({'dependencies': {'@tanstack/react-start': '1'}}))
+    assert app.ensure_prerender(str(tmp_path)) is True
+    assert 'prerender:' in (tmp_path / 'vite.config.ts').read_text()

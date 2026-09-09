@@ -49,10 +49,10 @@ Stack lifecycle behaves the way you'd expect: **delete** empties the bucket firs
 | Works | Doesn't (yet) |
 |---|---|
 | Static Vite/React single-page apps (Lovable's classic template) | Anything that needs a server at runtime: server functions, SSR-only loaders, API routes |
-| TanStack Start projects (Lovable's current template) **with prerendering enabled** — see below | Anything needing a backend: Lovable Cloud / Supabase auth, database, storage, edge functions keep pointing at their current host |
+| TanStack Start projects (Lovable's current template) — prerendered automatically, see below | Anything needing a backend: Lovable Cloud / Supabase auth, database, storage, edge functions keep pointing at their current host |
 | `bun.lock`/`bun.lockb` (bun) or `package-lock.json` (npm); zips that already contain `dist/`, `build/`, or `.output/public/` | Uploads over 50 MB — leave out `node_modules` and build output |
 
-**TanStack Start (Lovable's current template):** by default `vite build` targets Cloudflare Workers and produces a server bundle, so there's nothing static to host. Turn on prerendering in `vite.config.ts`:
+**TanStack Start (Lovable's current template):** by default `vite build` targets Cloudflare Workers and produces a server bundle, so there's nothing static to host. The deployer handles this for you: when it sees `@tanstack/react-start` in `package.json`, it enables prerendering in its *build copy* of `vite.config.ts` (your repository is never modified), so the build also writes a complete static site to `.output/public/`. Every route is rendered at build time. If you'd rather make it explicit in your project, the equivalent setting is:
 
 ```ts
 export default defineConfig({
@@ -62,8 +62,6 @@ export default defineConfig({
   },
 });
 ```
-
-The build then writes a complete static site to `.output/public/`, which Prodify deploys. Every route is rendered at build time; the deployer tells you exactly this if you upload without it.
 
 Other constraints:
 

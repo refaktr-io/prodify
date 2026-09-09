@@ -24,7 +24,7 @@ Parameters:
 
   DeployerImageDigest:
     Type: String
-    Default: sha256:3b1b8827c00944e44d1da47f79095aa6fc389652a473e30aca9fc2c52c1d0d4d
+    Default: sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
     AllowedPattern: '^sha256:[0-9a-f]{64}$'
     Description: Digest of the content-deployer image pinned into generated templates (printed by build-and-push.sh)
 

@@ -12,6 +12,7 @@ import io
 import json
 import mimetypes
 import os
+import re
 import shutil
 import subprocess
 import traceback
@@ -31,11 +32,13 @@ SKIP_FILES = {'_headers', '_redirects', '_routes.json'}
 # Start) write .output/public/ - which only holds an index.html when
 # prerendering is enabled; otherwise it's just assets for an SSR server.
 OUTPUT_DIRS = ('dist', 'build', os.path.join('.output', 'public'))
+PRERENDER_OPTION = 'prerender: { enabled: true, crawlLinks: true, autoStaticPathsDiscovery: true }'
+VITE_CONFIG_NAMES = ('vite.config.ts', 'vite.config.mts', 'vite.config.js', 'vite.config.mjs')
 TANSTACK_PRERENDER_HINT = (
-    "This is a TanStack Start project (Lovable's current template); its build produces a server "
-    "bundle, not a static site. In vite.config.ts add "
-    "tanstackStart: { prerender: { enabled: true, crawlLinks: true, autoStaticPathsDiscovery: true } } "
-    "and upload again - the build then writes a static site to .output/public."
+    "This is a TanStack Start project (Lovable's current template); its build produced a server "
+    "bundle, not a static site. Prodify enables prerendering automatically when it recognizes "
+    "vite.config.ts, but couldn't here. Add tanstackStart: { " + PRERENDER_OPTION + " } to "
+    "vite.config.ts and upload again - the build then writes a static site to .output/public."
 )
 BUILD_TIMEOUT_MARGIN_SECONDS = 90
 MAX_REASON_CHARS = 1500
@@ -202,6 +205,60 @@ def run(cmd, cwd, timeout):
     return result
 
 
+def inject_prerender(source):
+    """Add TanStack Start's prerender option to a vite config's source text.
+
+    Returns the patched text, the original text if prerender is already
+    configured, or None if the config shape isn't recognized.
+    """
+    if re.search(r'\bprerender\s*:', source):
+        return source
+    # Lovable's wrapper: defineConfig({ tanstackStart: { ... } })
+    m = re.search(r'tanstackStart\s*:\s*\{', source)
+    if m:
+        return source[:m.end()] + f'\n    {PRERENDER_OPTION},' + source[m.end():]
+    # Plain plugin: tanstackStart({ ... }) or tanstackStart()
+    m = re.search(r'tanstackStart\s*\(\s*\{', source)
+    if m:
+        return source[:m.end()] + f' {PRERENDER_OPTION},' + source[m.end():]
+    m = re.search(r'tanstackStart\s*\(\s*\)', source)
+    if m:
+        return source[:m.start()] + f'tanstackStart({{ {PRERENDER_OPTION} }})' + source[m.end():]
+    # Lovable's wrapper with no tanstackStart block at all
+    if '@lovable.dev/vite-tanstack-config' in source:
+        m = re.search(r'defineConfig\s*\(\s*\{', source)
+        if m:
+            return source[:m.end()] + f'\n  tanstackStart: {{ {PRERENDER_OPTION} }},' + source[m.end():]
+    return None
+
+
+def ensure_prerender(project_dir):
+    """TanStack Start builds a server by default; static hosting needs the pages
+    rendered at build time. Patch the *build copy's* vite config so users don't
+    have to change their repo. Returns True if prerendering is configured."""
+    if not uses_package(project_dir, '@tanstack/react-start'):
+        return False
+    for name in VITE_CONFIG_NAMES:
+        path = os.path.join(project_dir, name)
+        if not os.path.isfile(path):
+            continue
+        with open(path) as f:
+            source = f.read()
+        patched = inject_prerender(source)
+        if patched is None:
+            print(f"Could not recognize {name}; not enabling prerendering automatically")
+            return False
+        if patched != source:
+            with open(path, 'w') as f:
+                f.write(patched)
+            print(f"Enabled TanStack Start prerendering in {name} (build copy only)")
+        else:
+            print(f"{name} already configures prerendering")
+        return True
+    print("No vite config found; not enabling prerendering automatically")
+    return False
+
+
 def build_project(project_dir, context):
     has_bun_lock = any(os.path.exists(os.path.join(project_dir, f)) for f in ('bun.lockb', 'bun.lock'))
     has_npm_lock = os.path.exists(os.path.join(project_dir, 'package-lock.json'))
@@ -291,6 +348,7 @@ def deploy(props, context):
         print(f"Using pre-built output at {os.path.relpath(deploy_dir, WORK_ROOT)}")
     elif os.path.exists(os.path.join(project_dir, 'package.json')):
         print("No build output in the zip; building")
+        ensure_prerender(project_dir)
         deploy_dir = build_project(project_dir, context)
     else:
         print("No package.json; deploying the zip contents as-is")

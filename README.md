@@ -42,6 +42,8 @@ The generated stack creates:
 - A `ContentDeployer` Lambda (container image, arm64) that downloads, builds, and syncs the site, sets `Cache-Control` (`no-cache` for HTML, `immutable` for `assets/*`), and invalidates CloudFront on updates
 - Optional custom domain: pass `DomainName` and `AcmCertificateArn` (certificate must be in `us-east-1`), then point a CNAME or Route 53 alias at the `CloudFrontDomainName` output
 
+A complete generated template, with commentary, is in [examples/marios-nostalgia-bites/](examples/marios-nostalgia-bites/) — it's what Prodify produced for the reference project.
+
 Stack lifecycle behaves the way you'd expect: **delete** empties the bucket first so the stack removes cleanly; **update** is a no-op unless the source URL changed, and a rollback to the previously deployed source never re-downloads.
 
 ## Compatibility and limits

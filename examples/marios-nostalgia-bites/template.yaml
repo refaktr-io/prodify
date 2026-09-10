@@ -1,0 +1,224 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Prodify static site - S3 + CloudFront (generated 2026-09-10T04:28:42Z)
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: ''
+    Description: Optional custom domain, e.g. www.example.com. Requires AcmCertificateArn. After the stack is created, point a DNS CNAME (or Route 53 alias) at the CloudFrontDomainName output.
+  AcmCertificateArn:
+    Type: String
+    Default: ''
+    Description: ACM certificate ARN covering DomainName. CloudFront requires the certificate to live in us-east-1, whatever region this stack is in.
+
+Rules:
+  SupportedRegion:
+    Assertions:
+      - Assert: !Contains
+          - ["us-east-1", "us-east-2", "us-west-2", "ca-central-1", "eu-west-1", "eu-west-2", "eu-central-1", "eu-north-1", "ap-south-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "sa-east-1"]
+          - !Ref AWS::Region
+        AssertDescription: This template can only be deployed in a region where the Prodify deployer image is available. Switch the console to one of the listed regions.
+
+Conditions:
+  HasDomain: !And
+    - !Not [!Equals [!Ref DomainName, '']]
+    - !Not [!Equals [!Ref AcmCertificateArn, '']]
+
+Mappings:
+  DeployerImage:
+    us-east-1:
+      Uri: 532931254745.dkr.ecr.us-east-1.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+    us-east-2:
+      Uri: 532931254745.dkr.ecr.us-east-2.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+    us-west-2:
+      Uri: 532931254745.dkr.ecr.us-west-2.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+    ca-central-1:
+      Uri: 532931254745.dkr.ecr.ca-central-1.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+    eu-west-1:
+      Uri: 532931254745.dkr.ecr.eu-west-1.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+    eu-west-2:
+      Uri: 532931254745.dkr.ecr.eu-west-2.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+    eu-central-1:
+      Uri: 532931254745.dkr.ecr.eu-central-1.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+    eu-north-1:
+      Uri: 532931254745.dkr.ecr.eu-north-1.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+    ap-south-1:
+      Uri: 532931254745.dkr.ecr.ap-south-1.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+    ap-southeast-1:
+      Uri: 532931254745.dkr.ecr.ap-southeast-1.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+    ap-southeast-2:
+      Uri: 532931254745.dkr.ecr.ap-southeast-2.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+    ap-northeast-1:
+      Uri: 532931254745.dkr.ecr.ap-northeast-1.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+    sa-east-1:
+      Uri: 532931254745.dkr.ecr.sa-east-1.amazonaws.com/prodify-content-deployer@sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886
+
+Resources:
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-OAC"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipal
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${WebsiteBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                "AWS:SourceArn": !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+          # Deployer bookkeeping (last deployed source) is never served.
+          - Sid: HideDeployerState
+            Effect: Deny
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${WebsiteBucket.Arn}/.prodify/*"
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${AWS::StackName} (Prodify)"
+        HttpVersion: http2and3
+        DefaultRootObject: index.html
+        Aliases: !If
+          - HasDomain
+          - [!Ref DomainName]
+          - !Ref AWS::NoValue
+        ViewerCertificate: !If
+          - HasDomain
+          - AcmCertificateArn: !Ref AcmCertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt WebsiteBucket.RegionalDomainName
+            OriginAccessControlId: !Ref CloudFrontOriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          # Managed-CachingOptimized / Managed-CORS-S3Origin / Managed-SecurityHeadersPolicy
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
+          ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03
+        # Single-page app routing: unknown paths fall through to index.html.
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+
+  DeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DeployerPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource: !Sub "${WebsiteBucket.Arn}/*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt WebsiteBucket.Arn
+              - Effect: Allow
+                Action: cloudfront:CreateInvalidation
+                Resource: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  # Downloads the uploaded project, builds it if needed, and syncs the result
+  # into WebsiteBucket. Runs in this account; Prodify never executes the
+  # project's code.
+  ContentDeployer:
+    Type: AWS::Lambda::Function
+    Properties:
+      PackageType: Image
+      Role: !GetAtt DeployerRole.Arn
+      Timeout: 900
+      MemorySize: 3008
+      EphemeralStorage:
+        Size: 4096
+      Architectures:
+        - arm64
+      Code:
+        ImageUri: !FindInMap [DeployerImage, !Ref AWS::Region, Uri]
+
+  DeploymentTrigger:
+    Type: Custom::ContentDeployer
+    Properties:
+      ServiceToken: !GetAtt ContentDeployer.Arn
+      # Presigned; valid for about two hours after the template was generated.
+      SourceZipUrl: "https://github.com/refaktr-io/marios-nostalgia-bites/archive/refs/heads/main.zip"
+      BucketName: !Ref WebsiteBucket
+      DistributionId: !Ref CloudFrontDistribution
+
+Outputs:
+  SiteURL:
+    Description: Your website
+    Value: !If
+      - HasDomain
+      - !Sub "https://${DomainName}"
+      - !Sub "https://${CloudFrontDistribution.DomainName}"
+  CloudFrontURL:
+    Description: CloudFront URL (works even without a custom domain)
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}"
+  CloudFrontDomainName:
+    Description: Point your DNS CNAME / alias here when using a custom domain
+    Value: !GetAtt CloudFrontDistribution.DomainName
+  DistributionId:
+    Description: CloudFront distribution ID
+    Value: !Ref CloudFrontDistribution
+  S3BucketName:
+    Description: Bucket holding the built site
+    Value: !Ref WebsiteBucket

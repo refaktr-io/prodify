@@ -77,14 +77,20 @@ Resources:
             MaxAge: 3000
       LifecycleConfiguration:
         Rules:
-          - Id: DeleteAfter24Hours
+          - Id: ExpireUploads
             Status: Enabled
+            Prefix: uploads/
             ExpirationInDays: 1
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
+          - Id: ExpireGeneratedTemplates
+            Status: Enabled
+            Prefix: generated/
+            ExpirationInDays: 1
+          # examples/ (sample templates published by CI) is permanent.
 
-  # Anonymous read of generated templates only. Keys contain an unguessable
-  # UUID and objects expire via the lifecycle rule above; uploads/* stays private.
+  # Anonymous read of generated templates (unguessable UUID keys, 1-day
+  # expiry) and of the sample templates under examples/. uploads/* stays private.
   StagingBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -92,11 +98,13 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Sid: PublicReadGeneratedTemplates
+          - Sid: PublicReadTemplates
             Effect: Allow
             Principal: '*'
             Action: s3:GetObject
-            Resource: !Sub "${StagingBucket.Arn}/generated/*"
+            Resource:
+              - !Sub "${StagingBucket.Arn}/generated/*"
+              - !Sub "${StagingBucket.Arn}/examples/*"
 
   # ------------------------------------------------------------------- IAM
   LambdaExecutionRole:

@@ -39,6 +39,8 @@ Rules that bite:
 - The Lambda zip must include `templates/`; `generator.py` reads `templates/site-template.yaml` at runtime.
 - A new deployer image means a new digest: update the `DeployerImageDigest` default in `template.yaml` (that's the committed source of truth) and deploy.
 - **Every Prodify resource carries `Project=Prodify`**, activated as a cost allocation tag. Stacks get it via `--tags` (propagates to resources); the ECR scripts tag repositories; anything created by hand (deployment bucket, log groups) must be tagged by hand.
+- **Redeploying `prodify-github-oidc`: never pass `CreateOidcProvider=false`** for the maintainer stack — the stack owns the account's GitHub OIDC provider, and `false` deletes it (CI then can't assume the deploy role). Deploy that stack with `--capabilities CAPABILITY_NAMED_IAM --tags Project=Prodify` and no parameter overrides.
+- `examples/*/template.yaml` are generated (`STAGING_BUCKET=x python3 tests/test_example.py --write`); `tests/test_example.py` fails when the site template changes without regenerating. CI publishes them to the staging bucket's permanent public `examples/` prefix, so the README's sample deploy link keeps working.
 - **`cloudformation deploy` keeps an existing stack's previous value for every parameter you don't pass.** Changing a template default does nothing to the live stack; CI therefore passes every parameter explicitly (it greps the digest out of the template). When deploying by hand, pass `DeployerImageDigest` too.
 
 ## Architecture

@@ -7,6 +7,7 @@ on:
     paths:
       - 'backend/infrastructure/template.yaml'
       - 'backend/src/**'
+      - 'examples/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
@@ -82,3 +83,14 @@ jobs:
             --stack-name "$STACK_NAME" \
             --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' \
             --output text
+
+      # Sample templates users can deploy directly (permanent, public prefix).
+      - name: Publish example templates
+        run: |
+          BUCKET=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`StagingBucketName`].OutputValue' --output text)
+          for dir in examples/*/; do
+            name=$(basename "$dir")
+            aws s3 cp "${dir}template.yaml" "s3://${BUCKET}/examples/${name}/template.yaml" --content-type application/x-yaml
+            echo "https://${BUCKET}.s3.${AWS_REGION}.amazonaws.com/examples/${name}/template.yaml"
+          done

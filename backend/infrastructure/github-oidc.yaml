@@ -16,6 +16,10 @@ Parameters:
     Type: String
     Default: prodify-backend
     Description: Bucket the workflow uploads Lambda zips to
+  StagingBucketName:
+    Type: String
+    Default: prodify-staging
+    Description: Staging bucket of the backend stack; the workflow publishes examples/ templates into it
   CreateOidcProvider:
     Type: String
     Default: 'true'
@@ -63,6 +67,10 @@ Resources:
                   - s3:PutObject
                   - s3:GetObject
                 Resource: !Sub "arn:${AWS::Partition}:s3:::${DeploymentPackageBucket}/*"
+              - Sid: PublishExampleTemplates
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${StagingBucketName}/examples/*"
               - Sid: ManageBackendStack
                 Effect: Allow
                 Action:

@@ -71,6 +71,7 @@ Other constraints:
 - Stacks can be created in any region where the deployer image is replicated (`DeployerImageRegions`; the `/status` response lists them as `supportedRegions`, and the template's `Rules` block rejects others).
 - **Brand-new AWS accounts may not be allowed to create CloudFront distributions yet.** If the stack fails at `CloudFrontDistribution` with "Your account must be verified before you can add new CloudFront resources", open an AWS Support case (Account and billing → account verification) quoting that message; it's typically cleared within a day. Delete the rolled-back stack and deploy again afterwards.
 - **Accounts created with AWS's new sign-up experience are locked to one region** (us-east-2, eu-north-1, or ap-southeast-2, chosen from your contact address) and cannot create stacks in us-east-1 — the console shows an SCP "explicit deny". Open the deploy link with `region=` set to your project's region; all three are supported. Custom domains need an ACM certificate in us-east-1, which those accounts can't create, so use the CloudFront URL there.
+- **Deleting a stack can fail once at `CloudFrontDistribution`** with "The distribution you are trying to delete has not been disabled" — a CloudFront propagation race, not a leftover resource (the deployer has already emptied the bucket). Wait a couple of minutes and delete the stack again; it completes.
 - The hosted API is unauthenticated and rate-limited; use it for real projects, not load tests.
 
 ## Deploy your own instance

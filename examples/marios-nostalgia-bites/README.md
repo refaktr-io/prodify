@@ -6,7 +6,7 @@ A deployable example of what Prodify generates. [`template.yaml`](template.yaml)
 
 **[Deploy the sample to AWS (us-east-1)](https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https%3A%2F%2Fprodify-staging.s3.us-east-1.amazonaws.com%2Fexamples%2Fmarios-nostalgia-bites%2Ftemplate.yaml&stackName=prodify-sample)**
 
-Acknowledge that the template creates IAM resources, then **Create stack**. When it reaches `CREATE_COMPLETE`, the `SiteURL` output is the live site. Delete the stack to remove everything; the deployer empties the bucket first so deletion is clean.
+Acknowledge that the template creates IAM resources, then **Create stack**. When it reaches `CREATE_COMPLETE`, the `SiteURL` output is the live site. Delete the stack to remove everything; the deployer empties the bucket first so deletion is clean. If the delete fails once at `CloudFrontDistribution` ("has not been disabled"), that's CloudFront propagation timing — wait a couple of minutes and delete again.
 
 Other regions: change `region=` in the link to any of `us-east-1`, `us-east-2`, `us-west-2`, `ca-central-1`, `eu-west-1`, `eu-west-2`, `eu-central-1`, `eu-north-1`, `ap-south-1`, `ap-southeast-1`, `ap-southeast-2`, `ap-northeast-1`, `sa-east-1`. Accounts from AWS's new sign-up experience must use their assigned region (usually `us-east-2`). Brand-new accounts may need a one-time CloudFront verification first (see the main README).
 

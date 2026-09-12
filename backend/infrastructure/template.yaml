@@ -119,8 +119,9 @@ Resources:
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
-      SSESpecification:
-        SSEEnabled: true
+      # Encrypted at rest with the AWS-owned key (DynamoDB's default). Asking
+      # for the AWS-managed aws/dynamodb key fails in this account (KMS
+      # NotFoundException on the key the alias resolves to).
 
   # ------------------------------------------------------------------- IAM
   LambdaExecutionRole:

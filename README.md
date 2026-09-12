@@ -108,7 +108,7 @@ aws cloudformation deploy \
 
 Stack tags propagate to every taggable resource, and `Project` is meant to be activated as a cost allocation tag (`aws ce update-cost-allocation-tags-status --cost-allocation-tags-status TagKey=Project,Status=Active`) so Prodify's cost shows up as its own line in Cost Explorer. The scripts tag the ECR repositories the same way.
 
-The `ApiUrl` output is what a frontend calls (`POST /upload-request`, `GET /status/{requestId}`). Confirm the SNS subscription email to receive alarms. The staging bucket name is auto-generated unless you pass `StagingBucketName`.
+The `ApiUrl` output is what a frontend calls (`POST /upload-request`, `GET /status/{requestId}`, `GET /stats`). `/stats` returns usage counters — `uploads` (upload URLs issued), `conversions` (templates generated), `rejected` (oversize) — as totals and for today, kept in a DynamoDB table; nothing about individual users is stored. Confirm the SNS subscription email to receive alarms. The staging bucket name is auto-generated unless you pass `StagingBucketName`.
 
 **Continuous deployment:** deploy `backend/infrastructure/github-oidc.yaml` once (`--capabilities CAPABILITY_NAMED_IAM --tags Project=Prodify`), set its `DeployRoleArn` output as the `AWS_DEPLOY_ROLE_ARN` repository variable, and pushes to `main` deploy via [deploy.yml](.github/workflows/deploy.yml). Optional variables: `AWS_REGION`, `DEPLOYMENT_BUCKET`, `STACK_NAME`, `STAGING_BUCKET_NAME`, `ALARM_EMAIL`, `DEPLOYER_IMAGE_REGIONS`.
 

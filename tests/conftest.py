@@ -9,3 +9,5 @@ os.environ.setdefault('DEPLOYER_IMAGE_REPOSITORY', 'prodify-content-deployer')
 os.environ.setdefault('DEPLOYER_IMAGE_DIGEST', 'sha256:' + 'a' * 64)
 os.environ.setdefault('DEPLOYER_IMAGE_REGIONS', 'us-east-1,eu-west-1')
 os.environ.setdefault('MAX_UPLOAD_BYTES', str(50 * 1024 * 1024))
+# Counting is a no-op without a table; usage tests patch usage.TABLE explicitly.
+os.environ.setdefault('USAGE_TABLE', '')

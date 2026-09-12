@@ -4,6 +4,8 @@ import uuid
 
 import boto3
 
+import usage
+
 s3 = boto3.client('s3')
 BUCKET_NAME = os.environ['STAGING_BUCKET']
 MAX_UPLOAD_BYTES = int(os.environ.get('MAX_UPLOAD_BYTES', 50 * 1024 * 1024))
@@ -24,6 +26,8 @@ def handler(event, context):
         Params={'Bucket': BUCKET_NAME, 'Key': key, 'ContentType': 'application/zip'},
         ExpiresIn=300
     )
+
+    usage.record('uploads')
 
     return {
         'statusCode': 200,

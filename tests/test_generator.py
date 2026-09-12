@@ -43,9 +43,10 @@ def lambda_context():
 
 
 def test_handler_writes_template_for_valid_upload():
-    with patch.object(generator, 's3') as s3:
+    with patch.object(generator, 's3') as s3, patch.object(generator.usage, 'record') as record:
         s3.generate_presigned_url.return_value = 'https://signed.example/source.zip'
         generator.handler(s3_event('uploads/req-1/source.zip', 1024), lambda_context())
+    record.assert_called_once_with('conversions')
 
     s3.put_object.assert_called_once()
     kwargs = s3.put_object.call_args.kwargs
@@ -56,8 +57,9 @@ def test_handler_writes_template_for_valid_upload():
 
 
 def test_handler_rejects_oversized_upload_with_error_marker():
-    with patch.object(generator, 's3') as s3:
+    with patch.object(generator, 's3') as s3, patch.object(generator.usage, 'record') as record:
         generator.handler(s3_event('uploads/req-2/source.zip', 200 * 1024 * 1024), lambda_context())
+    record.assert_called_once_with('rejected')
 
     s3.delete_object.assert_called_once_with(Bucket=generator.BUCKET_NAME, Key='uploads/req-2/source.zip')
     kwargs = s3.put_object.call_args.kwargs

@@ -106,6 +106,22 @@ Resources:
               - !Sub "${StagingBucket.Arn}/generated/*"
               - !Sub "${StagingBucket.Arn}/examples/*"
 
+  # Usage counters: pk = 'total' | 'day#YYYY-MM-DD', one numeric attribute per event.
+  UsageTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+
   # ------------------------------------------------------------------- IAM
   LambdaExecutionRole:
     Type: AWS::IAM::Role
@@ -133,6 +149,15 @@ Resources:
               - Effect: Allow
                 Action: s3:ListBucket
                 Resource: !GetAtt StagingBucket.Arn
+        - PolicyName: UsageCounters
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                Resource: !GetAtt UsageTable.Arn
 
   # --------------------------------------------------------------- Lambdas
   UploadRequestFunction:
@@ -149,6 +174,7 @@ Resources:
         Variables:
           STAGING_BUCKET: !Ref StagingBucket
           MAX_UPLOAD_BYTES: !Ref MaxUploadBytes
+          USAGE_TABLE: !Ref UsageTable
       Timeout: 30
 
   UploadRequestPermission:
@@ -200,6 +226,7 @@ Resources:
           DEPLOYER_IMAGE_REPOSITORY: !Ref DeployerImageRepository
           DEPLOYER_IMAGE_DIGEST: !Ref DeployerImageDigest
           DEPLOYER_IMAGE_REGIONS: !Join [',', !Ref DeployerImageRegions]
+          USAGE_TABLE: !Ref UsageTable
       Timeout: 60
 
   GeneratorPermission:
@@ -210,6 +237,29 @@ Resources:
       Principal: s3.amazonaws.com
       SourceAccount: !Ref AWS::AccountId
       SourceArn: !GetAtt StagingBucket.Arn
+
+  UsageStatsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: prodify-stats
+      Runtime: python3.13
+      Handler: stats.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref DeploymentPackageBucket
+        S3Key: !Ref LambdaCodeKey
+      Environment:
+        Variables:
+          USAGE_TABLE: !Ref UsageTable
+      Timeout: 10
+
+  UsageStatsPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref UsageStatsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ProdifyApi}/*"
 
   # A bucket can't declare a notification to a function that also depends on
   # the bucket (circular), so a custom resource installs it after both exist.
@@ -401,16 +451,67 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Origin: true
 
-  # Rename this logical ID (e.g. ApiDeployment2) whenever methods/resources
-  # change: a Deployment is immutable and the stage only serves the one it
-  # points at.
-  ApiDeployment:
+  UsageStatsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ProdifyApi
+      ParentId: !GetAtt ProdifyApi.RootResourceId
+      PathPart: stats
+
+  UsageStatsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ProdifyApi
+      ResourceId: !Ref UsageStatsResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UsageStatsFunction.Arn}/invocations"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+
+  UsageStatsOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ProdifyApi
+      ResourceId: !Ref UsageStatsResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # Rename this logical ID (ApiDeployment2 -> ApiDeployment3 ...) whenever
+  # methods/resources change: a Deployment is immutable and the stage only
+  # serves the one it points at.
+  ApiDeployment2:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
       - UploadRequestMethod
       - StatusMethod
       - UploadRequestOptionsMethod
       - StatusOptionsMethod
+      - UsageStatsMethod
+      - UsageStatsOptionsMethod
     Properties:
       RestApiId: !Ref ProdifyApi
 
@@ -418,7 +519,7 @@ Resources:
     Type: AWS::ApiGateway::Stage
     Properties:
       RestApiId: !Ref ProdifyApi
-      DeploymentId: !Ref ApiDeployment
+      DeploymentId: !Ref ApiDeployment2
       StageName: Prod
       MethodSettings:
         - ResourcePath: '/*'
@@ -494,3 +595,7 @@ Outputs:
   AlarmTopicArn:
     Description: SNS topic that receives alarm notifications
     Value: !Ref AlarmTopic
+
+  UsageTableName:
+    Description: DynamoDB table holding usage counters
+    Value: !Ref UsageTable

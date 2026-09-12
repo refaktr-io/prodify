@@ -114,6 +114,17 @@ Resources:
                   - ecr:DescribeRepositories
                   - ecr:PutReplicationConfiguration
                   - ecr:DescribeRegistry
+                  - dynamodb:CreateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeTable
+                  - dynamodb:UpdateTable
+                  - dynamodb:DescribeContinuousBackups
+                  - dynamodb:UpdateContinuousBackups
+                  - dynamodb:DescribeTimeToLive
+                  - dynamodb:UpdateTimeToLive
+                  - dynamodb:ListTagsOfResource
+                  - dynamodb:TagResource
+                  - dynamodb:UntagResource
                 Resource: '*'
               - Sid: ManageStackRoles
                 Effect: Allow

@@ -11,6 +11,8 @@ from pathlib import Path
 
 import boto3
 
+import usage
+
 s3 = boto3.client('s3')
 BUCKET_NAME = os.environ['STAGING_BUCKET']
 MAX_UPLOAD_BYTES = int(os.environ.get('MAX_UPLOAD_BYTES', 50 * 1024 * 1024))
@@ -66,6 +68,7 @@ def handler(event, context):
         print(f"Rejecting {key}: {size} bytes exceeds {MAX_UPLOAD_BYTES}")
         s3.delete_object(Bucket=BUCKET_NAME, Key=key)
         write_error(request_id, f"Upload is larger than the {limit_mb} MB limit. Remove node_modules and build output from the zip and try again.")
+        usage.record('rejected')
         return
 
     source_zip_url = s3.generate_presigned_url(
@@ -91,4 +94,5 @@ def handler(event, context):
         Body=template,
         ContentType='application/x-yaml',
     )
+    usage.record('conversions')
     print(f"Generated {output_key} ({size} byte upload)")

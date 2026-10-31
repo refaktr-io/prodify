@@ -173,6 +173,10 @@ Resources:
     Type: Custom::ContentDeployer
     Properties:
       ServiceToken: !GetAtt ContentDeployer.Arn
+      # If the deployer dies without responding (out of memory, killed at its
+      # 900s timeout), fail the stack after 20 minutes instead of CloudFormation's
+      # default one hour.
+      ServiceTimeout: 1200
       # Presigned; valid for about two hours after the template was generated.
       SourceZipUrl: "__SOURCE_ZIP_URL__"
       BucketName: !Ref WebsiteBucket

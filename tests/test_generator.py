@@ -68,6 +68,18 @@ def test_handler_rejects_oversized_upload_with_error_marker():
     s3.generate_presigned_url.assert_not_called()
 
 
+def test_handler_writes_error_marker_on_unexpected_failure():
+    with patch.object(generator, 's3') as s3, patch.object(generator.usage, 'record') as record:
+        s3.generate_presigned_url.side_effect = RuntimeError('boom')
+        with pytest.raises(RuntimeError):
+            generator.handler(s3_event('uploads/req-3/source.zip', 1024), lambda_context())
+    record.assert_not_called()
+
+    kwargs = s3.put_object.call_args.kwargs
+    assert kwargs['Key'] == 'generated/req-3/error.json'
+    assert json.loads(kwargs['Body'])['status'] == 'ERROR'
+
+
 @pytest.mark.parametrize('key', ['uploads/source.zip', 'other/req/source.zip', 'uploads/req/notes.zip'])
 def test_handler_ignores_unexpected_keys(key):
     with patch.object(generator, 's3') as s3:

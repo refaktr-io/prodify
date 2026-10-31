@@ -302,13 +302,19 @@ Resources:
           s3 = boto3.client('s3')
 
           def handler(event, context):
+              # Keep the physical ID stable. If an Update returned a new one,
+              # CloudFormation would follow with a cleanup Delete carrying the
+              # same bucket - and that Delete would wipe the live trigger.
+              # Create uses the bucket name; Update/Delete echo the existing ID
+              # (stacks created before this fix keep their log-stream ID).
+              physical_id = event.get('PhysicalResourceId') or event['ResourceProperties'].get('Bucket')
               try:
                   bucket = event['ResourceProperties']['Bucket']
                   function_arn = event['ResourceProperties']['FunctionArn']
 
                   if event['RequestType'] == 'Delete':
                       s3.put_bucket_notification_configuration(Bucket=bucket, NotificationConfiguration={})
-                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physical_id)
                       return
 
                   config = {
@@ -327,10 +333,10 @@ Resources:
                   }
 
                   s3.put_bucket_notification_configuration(Bucket=bucket, NotificationConfiguration=config)
-                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physical_id)
               except Exception as e:
                   print(e)
-                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, physical_id)
 
   S3NotificationCustomResource:
     Type: Custom::S3NotificationConfig

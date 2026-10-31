@@ -71,6 +71,22 @@ def handler(event, context):
         usage.record('rejected')
         return
 
+    try:
+        generate(key, request_id, context)
+    except Exception:
+        # Without a marker /status would report PENDING forever. Re-raise so the
+        # Errors metric (and its alarm) still sees it; if S3's async retry then
+        # succeeds, status reports READY because template.yaml wins.
+        try:
+            write_error(request_id, "Prodify couldn't generate a template for this upload. Please try again.")
+        except Exception as e:
+            print(f"Could not write error marker: {e}")
+        raise
+    usage.record('conversions')
+    print(f"Generated generated/{request_id}/template.yaml ({size} byte upload)")
+
+
+def generate(key, request_id, context):
     source_zip_url = s3.generate_presigned_url(
         'get_object',
         Params={'Bucket': BUCKET_NAME, 'Key': key},
@@ -87,12 +103,9 @@ def handler(event, context):
         os.environ['DEPLOYER_IMAGE_DIGEST'],
     )
 
-    output_key = f"generated/{request_id}/template.yaml"
     s3.put_object(
         Bucket=BUCKET_NAME,
-        Key=output_key,
+        Key=f"generated/{request_id}/template.yaml",
         Body=template,
         ContentType='application/x-yaml',
     )
-    usage.record('conversions')
-    print(f"Generated {output_key} ({size} byte upload)")

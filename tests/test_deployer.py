@@ -4,7 +4,7 @@ The end-to-end build path is exercised separately by tests/docker/run-local.sh.
 """
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -69,9 +69,65 @@ def test_update_with_new_source_deploys_records_state_and_invalidates(responses)
          patch.object(app, 'invalidate') as invalidate:
         app.handler(cfn_event('Update', source_url='https://example.com/new.zip', old_source_url='https://example.com/old.zip'), context())
     deploy.assert_called_once()
-    write_state.assert_called_once_with('site-bucket', {'sourceZipUrl': 'https://example.com/new.zip', 'uploadedFiles': 12})
+    write_state.assert_called_once_with('site-bucket', {
+        'sourceZipUrl': 'https://example.com/new.zip',
+        'previousSourceZipUrl': 'https://example.com/old.zip',
+        'uploadedFiles': 12,
+    })
     invalidate.assert_called_once_with('E123', 'req-1')
     assert responses[0] == {'status': 'SUCCESS', 'data': {'UploadedFiles': 12}, 'physical_id': 'prodify-content-site-bucket', 'reason': None}
+
+
+def test_rollback_after_later_failure_keeps_current_content_when_source_expired(responses):
+    # The new source deployed, then something later in the stack update failed.
+    # The rollback re-sends the previous URL, long expired: keep the current
+    # content and succeed instead of leaving UPDATE_ROLLBACK_FAILED.
+    state = {'sourceZipUrl': 'https://example.com/new.zip', 'previousSourceZipUrl': 'https://example.com/old.zip', 'uploadedFiles': 12}
+    with patch.object(app, 'read_state', return_value=state), \
+         patch.object(app, 'deploy', side_effect=app.SourceExpired('expired')), \
+         patch.object(app, 'write_state') as write_state:
+        app.handler(cfn_event('Update', source_url='https://example.com/old.zip', old_source_url='https://example.com/new.zip'), context())
+    write_state.assert_not_called()
+    assert responses[0]['status'] == 'SUCCESS'
+    assert responses[0]['data'] == {'UploadedFiles': 12}
+
+
+def test_rollback_redeploys_previous_source_while_still_downloadable(responses):
+    state = {'sourceZipUrl': 'https://example.com/new.zip', 'previousSourceZipUrl': 'https://example.com/old.zip'}
+    with patch.object(app, 'read_state', return_value=state), \
+         patch.object(app, 'deploy', return_value=5), \
+         patch.object(app, 'write_state') as write_state, \
+         patch.object(app, 'invalidate'):
+        app.handler(cfn_event('Update', source_url='https://example.com/old.zip', old_source_url='https://example.com/new.zip'), context())
+    assert write_state.call_args.args[1]['sourceZipUrl'] == 'https://example.com/old.zip'
+    assert responses[0]['status'] == 'SUCCESS'
+
+
+def test_expired_source_on_ordinary_update_fails(responses):
+    with patch.object(app, 'read_state', return_value={'sourceZipUrl': 'https://example.com/old.zip'}), \
+         patch.object(app, 'deploy', side_effect=app.SourceExpired('The source download link has expired')):
+        app.handler(cfn_event('Update', source_url='https://example.com/new.zip', old_source_url='https://example.com/old.zip'), context())
+    assert responses[0]['status'] == 'FAILED'
+    assert 'expired' in responses[0]['reason']
+
+
+def test_failed_invalidation_does_not_fail_the_update():
+    cloudfront = MagicMock()
+    cloudfront.create_invalidation.side_effect = RuntimeError('TooManyInvalidationsInProgress')
+    with patch.object(app.boto3, 'client', return_value=cloudfront):
+        app.invalidate('E123', 'req-1')
+    cloudfront.create_invalidation.assert_called_once()
+
+
+def test_sync_uploads_pages_after_assets(tmp_path):
+    files = {'index.html': tmp_path / 'index.html', 'assets/app-1.js': tmp_path / 'app.js', 'about/index.html': tmp_path / 'about.html'}
+    for path in files.values():
+        path.write_text('x')
+    with patch.object(app, 's3') as s3, patch.object(app, 'list_keys', return_value=[]):
+        app.sync_to_bucket('site-bucket', {k: str(v) for k, v in files.items()})
+    keys = [c.kwargs['Key'] for c in s3.put_object.call_args_list]
+    assert keys[0] == 'assets/app-1.js'
+    assert set(keys[1:]) == {'index.html', 'about/index.html'}
 
 
 def test_create_does_not_invalidate(responses):

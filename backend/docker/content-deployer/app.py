@@ -4,9 +4,13 @@ Create/Update: download the project zip, build it if it isn't pre-built,
 sync the output into the site bucket, invalidate CloudFront on updates.
 Delete: empty the bucket so CloudFormation can remove it.
 
-Update is idempotent on SourceZipUrl. The URL of the last successful deploy
-is recorded in .prodify/state.json inside the bucket, so a rollback to the
-previous (long-expired) URL is a no-op instead of a second failure.
+Update is idempotent on SourceZipUrl. .prodify/state.json inside the bucket
+records the URL whose content the bucket holds, plus the one before it. A
+rollback re-sends an earlier URL that has usually expired (links last ~2h):
+if it is the recorded current URL the update is a no-op; if it is the recorded
+previous URL (the new content was deployed but the stack update failed
+afterwards) it is redeployed when still downloadable, otherwise the current
+content stays and the rollback still succeeds instead of failing a second time.
 """
 import io
 import json
@@ -93,7 +97,7 @@ def send_response(event, context, status, data=None, physical_id=None, reason=No
         headers={'content-type': '', 'content-length': str(len(body))},
     )
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             print(f"CloudFormation response: {resp.status}")
     except Exception as e:
         print(f"send_response failed: {e}")
@@ -101,6 +105,10 @@ def send_response(event, context, status, data=None, physical_id=None, reason=No
 
 class DeployError(Exception):
     """Failure with a message meant for the stack events, not just the logs."""
+
+
+class SourceExpired(DeployError):
+    """The presigned SourceZipUrl can no longer be downloaded."""
 
 
 # ---------------------------------------------------------------- Bucket helpers
@@ -148,15 +156,19 @@ def download_and_extract(source_url):
 
     print("Downloading project zip")
     try:
-        with urllib.request.urlopen(source_url) as resp:
+        # timeout bounds each socket operation, so a stalled transfer fails
+        # with a stack event instead of running into the Lambda timeout.
+        with urllib.request.urlopen(source_url, timeout=60) as resp:
             content = resp.read()
     except urllib.error.HTTPError as e:
         if e.code in (403, 400):
-            raise DeployError(
+            raise SourceExpired(
                 "The source download link has expired (links are valid for ~2 hours). "
                 "Upload the project to Prodify again and update the stack with the new template."
             ) from e
         raise DeployError(f"Could not download the project zip (HTTP {e.code})") from e
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise DeployError(f"Could not download the project zip: {e}") from e
 
     print(f"Extracting {len(content)} bytes")
     with zipfile.ZipFile(io.BytesIO(content)) as z:
@@ -324,8 +336,13 @@ def sync_to_bucket(bucket, files):
                 ContentType=content_type_for(key), CacheControl=cache_control_for(key),
             )
 
+    # Pages last: if an upload fails midway, the live HTML still references
+    # assets that exist (old ones are only removed after everything uploaded).
+    pages = {k: v for k, v in files.items() if k.endswith('.html')}
+    others = {k: v for k, v in files.items() if k not in pages}
     with ThreadPoolExecutor(max_workers=16) as pool:
-        list(pool.map(upload, files.items()))
+        list(pool.map(upload, others.items()))
+        list(pool.map(upload, pages.items()))
     print(f"Uploaded {len(files)} files")
 
     stale = [k for k in list_keys(bucket) if k not in files and not k.startswith('.prodify/')]
@@ -334,11 +351,17 @@ def sync_to_bucket(bucket, files):
 
 
 def invalidate(distribution_id, request_id):
-    boto3.client('cloudfront').create_invalidation(
-        DistributionId=distribution_id,
-        InvalidationBatch={'Paths': {'Quantity': 1, 'Items': ['/*']}, 'CallerReference': request_id},
-    )
-    print(f"Invalidated distribution {distribution_id}")
+    """Best effort: the content is already live, and failing here would roll
+    the stack back over it. HTML is no-cache, so a missed invalidation only
+    leaves non-hashed files stale for up to their max-age."""
+    try:
+        boto3.client('cloudfront').create_invalidation(
+            DistributionId=distribution_id,
+            InvalidationBatch={'Paths': {'Quantity': 1, 'Items': ['/*']}, 'CallerReference': request_id},
+        )
+        print(f"Invalidated distribution {distribution_id}")
+    except Exception as e:
+        print(f"WARNING: CloudFront invalidation failed, continuing: {e}")
 
 
 def deploy(props, context):
@@ -376,15 +399,29 @@ def handler(event, context):
             send_response(event, context, 'SUCCESS', physical_id=physical_id)
             return
 
-        if request_type == 'Update':
-            state = read_state(bucket)
-            if state.get('sourceZipUrl') == props.get('SourceZipUrl'):
-                print("SourceZipUrl unchanged since last successful deploy; nothing to do")
-                send_response(event, context, 'SUCCESS', {'UploadedFiles': state.get('uploadedFiles', 0)}, physical_id)
-                return
+        state = read_state(bucket) if request_type == 'Update' else {}
+        source_url = props.get('SourceZipUrl')
+        if request_type == 'Update' and state.get('sourceZipUrl') == source_url:
+            print("SourceZipUrl unchanged since last successful deploy; nothing to do")
+            send_response(event, context, 'SUCCESS', {'UploadedFiles': state.get('uploadedFiles', 0)}, physical_id)
+            return
 
-        uploaded = deploy(props, context)
-        write_state(bucket, {'sourceZipUrl': props['SourceZipUrl'], 'uploadedFiles': uploaded})
+        try:
+            uploaded = deploy(props, context)
+        except SourceExpired:
+            if request_type != 'Update' or not state.get('sourceZipUrl') or state.get('previousSourceZipUrl') != source_url:
+                raise
+            # Rollback to the content this bucket held before the last deploy,
+            # whose link has expired. Keep serving the current content rather
+            # than leaving the stack in UPDATE_ROLLBACK_FAILED.
+            print("Rollback source has expired; keeping the currently deployed content")
+            send_response(event, context, 'SUCCESS', {'UploadedFiles': state.get('uploadedFiles', 0)}, physical_id)
+            return
+        write_state(bucket, {
+            'sourceZipUrl': source_url,
+            'previousSourceZipUrl': state.get('sourceZipUrl'),
+            'uploadedFiles': uploaded,
+        })
 
         if request_type == 'Update' and props.get('DistributionId'):
             invalidate(props['DistributionId'], event['RequestId'])

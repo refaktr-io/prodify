@@ -3,11 +3,20 @@ site template renders, so the committed example never drifts from reality.
 
 Regenerate:  STAGING_BUCKET=x python3 tests/test_example.py --write
 """
+import re
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 EXAMPLE = REPO / 'examples' / 'marios-nostalgia-bites' / 'template.yaml'
+BACKEND_TEMPLATE = REPO / 'backend' / 'infrastructure' / 'template.yaml'
+
+
+def pinned_digest():
+    """The DeployerImageDigest default: the example deploys the same image as the live stack."""
+    match = re.search(r'DeployerImageDigest:\n(?:\s+.*\n)*?\s+Default: (sha256:[0-9a-f]{64})', BACKEND_TEMPLATE.read_text())
+    return match.group(1)
+
 
 INPUTS = dict(
     source_zip_url='https://github.com/refaktr-io/marios-nostalgia-bites/archive/refs/heads/main.zip',
@@ -15,7 +24,7 @@ INPUTS = dict(
     region_names=['us-east-1', 'us-east-2', 'us-west-2', 'ca-central-1', 'eu-west-1', 'eu-west-2', 'eu-central-1',
                   'eu-north-1', 'ap-south-1', 'ap-southeast-1', 'ap-southeast-2', 'ap-northeast-1', 'sa-east-1'],
     repository='prodify-content-deployer',
-    digest='sha256:1d6d6d5e29a8f39b6a7e49ebdb615440adbf02acaced379a1f371ef762ad4886',
+    digest=pinned_digest(),
     generated_at='2026-09-10T04:28:42Z',
 )
 

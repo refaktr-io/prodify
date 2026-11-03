@@ -1,6 +1,6 @@
 # Runs inside the site owner's account (see app.py). Everything is pinned:
 # this image is pulled by stacks in other accounts, so builds must be reproducible.
-FROM public.ecr.aws/lambda/python:3.13-arm64@sha256:790178a0fca178964c62db55f3f8f3319cbcafd125192cd18729a11a0ec01ea6
+FROM public.ecr.aws/lambda/python:3.14-arm64@sha256:4f7579c9c34916dc01053e97d2476a29e1970d5320ce0a71dfc1ac8582828851
 
 ARG NODE_VERSION=22.23.2
 ARG BUN_VERSION=1.4.2

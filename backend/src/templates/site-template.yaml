@@ -75,6 +75,30 @@ Resources:
             Action: s3:GetObject
             Resource: !Sub "${WebsiteBucket.Arn}/.prodify/*"
 
+  # Serves prerendered pages (TanStack Start writes about/index.html) at their
+  # own URLs: /about and /about/ are fetched as /about/index.html. Paths with a
+  # file extension pass through. The name must be unique in the account and
+  # at most 64 characters, so it comes from the stack ID, not the stack name.
+  IndexRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Join ['-', ['prodify', !Select [2, !Split ['/', !Ref AWS::StackId]]]]
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Rewrite extensionless paths to index.html
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var uri = request.uri;
+          if (uri.charAt(uri.length - 1) === '/') {
+            request.uri = uri + 'index.html';
+          } else if (uri.lastIndexOf('.') < uri.lastIndexOf('/')) {
+            request.uri = uri + '/index.html';
+          }
+          return request;
+        }
+
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -107,7 +131,12 @@ Resources:
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
           OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
           ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt IndexRewriteFunction.FunctionARN
         # Single-page app routing: unknown paths fall through to index.html.
+        # IndexRewriteFunction tries <path>/index.html first; when that object
+        # doesn't exist S3 answers 403 and this serves the root index.html.
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 200
